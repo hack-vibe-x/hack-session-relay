@@ -1,6 +1,7 @@
 ---
 name: session-relay
 description: Checks and controls session-relay on this computer, which sends the Claude Code and Codex conversation records to the relay server once a day. Shows the status, syncs now, changes the code, stops it or removes it. Use for "session relay status", "세션 릴레이 상태 알려줘", "동기화 상태", "지금 동기화해줘", "세션 전송 멈춰줘", "새 코드로 바꿔줘", "세션 릴레이 지워줘".
+license: Apache-2.0
 ---
 
 # session-relay

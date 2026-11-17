@@ -111,3 +111,7 @@ python3 tests/test_e2e.py
 ```
 
 실제 서버 프로세스와 가짜 홈 폴더(가짜 `~/.claude`, `~/.codex`)로 다음 흐름을 확인한다: 발행 → `install.sh` 설치 → 자정 분할 → 재동기화 → 종료 → zip → 관리자 웹 → 삭제.
+
+## 라이선스
+
+Apache License 2.0. `LICENSE`와 `NOTICE`를 보라.
