@@ -20,7 +20,8 @@ import urllib.request
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RELAY = os.path.join(ROOT, "skills", "session-relay", "scripts", "relay.py")
+RELAY = os.path.join(ROOT, "client", "relay.py")
+INSTALL = os.path.join(ROOT, "install.sh")
 SERVER = os.path.join(ROOT, "server", "app.py")
 ADMIN = os.path.join(ROOT, "admin", "admin.py")
 CLIENT_PY = "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else sys.executable
@@ -113,7 +114,10 @@ class E2E(unittest.TestCase):
             f.write(line(timestamp=utc("2026-11-16 12:00"), type="session_meta", payload={"source": "vscode"}))
         with open(os.path.join(self.codex, "external_agent_session_imports.json"), "w") as f:
             json.dump({"records": [{"imported_thread_id": imported}]}, f)
-        self.env = dict(os.environ, SESSION_RELAY_HOME=os.path.join(self.home, "relay"),
+        os.makedirs(os.path.join(self.home, ".claude"))
+        os.makedirs(os.path.join(self.home, ".codex"))
+        self.env = dict(os.environ, HOME=self.home, SESSION_RELAY_LANG="en",
+                        SESSION_RELAY_HOME=os.path.join(self.home, ".session-relay"),
                         SESSION_RELAY_CLAUDE_DIR=self.claude, SESSION_RELAY_CODEX_DIR=self.codex,
                         SESSION_RELAY_NO_LAUNCHD="1", SESSION_RELAY_LABEL="io.session-relay.test")
 
@@ -178,7 +182,7 @@ class E2E(unittest.TestCase):
         # The admin ends the code. The next daily tick hears it from the server and stops for good.
         call(self.url + "/admin/users/" + uid, "PATCH", {"expires_at": "now"})
         rc, out = self.relay("tick", now="2026-11-19 09:00")
-        self.assertIn("Stopped (expired)", out)
+        self.assertIn("Stopped (ended)", out)
         self.assertEqual(self.state()["stopped"]["reason"], "expired")
         rc, out = self.relay("tick", now="2026-11-20 09:00")
         self.assertEqual((rc, out), (0, ""))  # No more calls.
@@ -194,8 +198,44 @@ class E2E(unittest.TestCase):
         with open(cfg_path, "w") as f:
             json.dump(cfg, f)
         rc, out = self.relay("tick", now="2026-11-19 09:00")
-        self.assertIn("Stopped (expired)", out)
+        self.assertIn("Stopped (ended)", out)
         self.assertNotIn("reach", out)
+
+    def run_install(self, *args, env=None):
+        res = subprocess.run(["sh", INSTALL] + list(args), env=env or self.env, capture_output=True, text=True,
+                             timeout=120, cwd=self.home, stdin=subprocess.DEVNULL, start_new_session=True)
+        return res.returncode, res.stdout + res.stderr
+
+    def test_install_script_and_uninstall(self):
+        uid, code = self.issue()
+        rc, out = self.run_install(code, "--server", self.url, "--no-job", "--foreground")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Code confirmed", out)
+        self.assertIn("Synced: 3 slices", out)
+        relay_home = self.env["SESSION_RELAY_HOME"]
+        wrapper = os.path.join(relay_home, "relay")
+        skills = [os.path.join(self.home, ".claude", "skills", "session-relay", "SKILL.md"),
+                  os.path.join(self.home, ".agents", "skills", "session-relay", "SKILL.md")]
+        for f in [wrapper, os.path.join(relay_home, "README.md"), os.path.join(relay_home, "app", "relay.py")] + skills:
+            self.assertTrue(os.path.exists(f), f)
+        res = subprocess.run([wrapper, "status", "--json"], env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(json.loads(res.stdout)["slices_sent"], 3)
+        res = subprocess.run([wrapper, "uninstall"], env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertIn("Removed", res.stdout)
+        for f in [relay_home] + skills:
+            self.assertFalse(os.path.exists(f), f)
+
+    def test_install_needs_code_without_terminal(self):
+        rc, out = self.run_install("--server", self.url)
+        self.assertEqual(rc, 2, out)
+        self.assertIn("A code is required", out)
+        self.assertFalse(os.path.exists(self.env["SESSION_RELAY_HOME"]))
+
+    def test_korean_messages(self):
+        env = dict(self.env, SESSION_RELAY_LANG="ko")
+        rc, out = self.run_install("--code", "SR-AAAA-BBBB-CCCC-DDDD", "--server", self.url, env=env)
+        self.assertEqual(rc, 2, out)
+        self.assertIn("접속 코드가 맞지 않습니다", out)
 
     def test_bad_code(self):
         rc, out = self.relay("init", "--code", "SR-AAAA-BBBB-CCCC-DDDD")

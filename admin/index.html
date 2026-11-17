@@ -87,7 +87,7 @@ tr.click { cursor: pointer; } tr.click:hover td { background: var(--bg); } tr.se
 td.num, th.num { text-align: right; }
 .tool { font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); }
 .path { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted); }
-dialog { border: 1px solid var(--line); border-radius: 14px; padding: 0; width: min(460px, calc(100vw - 32px)); background: var(--panel); color: var(--ink); }
+dialog { border: 1px solid var(--line); border-radius: 14px; padding: 0; width: min(560px, calc(100vw - 32px)); background: var(--panel); color: var(--ink); }
 dialog::backdrop { background: rgba(0,0,0,.35); }
 dialog form, dialog .body { padding: 20px 22px; display: grid; gap: 12px; }
 dialog h3 { margin: 0; font-size: 16px; }
@@ -95,7 +95,7 @@ label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
 .presets { display: flex; gap: 6px; flex-wrap: wrap; }
 .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .issued { font-size: 22px; text-align: center; padding: 14px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); }
-.msg { white-space: pre-wrap; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 13px; color: var(--ink); }
+.msg { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 13px; color: var(--ink); }
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 99px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
 .toast.show { opacity: 1; }
 .err { color: var(--warn); font-size: 13px; }
@@ -230,7 +230,7 @@ function renderDetail() {
     <div class="card">
       <div class="head"><h2>${esc(u.phone)}</h2>${badge(u)}<span class="memo">${esc(u.memo || '')}</span></div>
       <div class="facts">
-        <div class="fact"><div class="k">코드</div><div class="v inline">${u.code ? `<span class="code">${esc(u.code)}</span><button class="btn small" data-copy="${esc(u.code)}">복사</button>` : `<span class="code">····${esc(u.code_hint || '')}</span>`}</div></div>
+        <div class="fact"><div class="k">코드</div><div class="v inline">${u.code ? `<span class="code">${esc(u.code)}</span><button class="btn small" data-copy="${esc(u.code)}">복사</button><button class="btn small" data-guide="1">안내문 복사</button>` : `<span class="code">····${esc(u.code_hint || '')}</span>`}</div></div>
         <div class="fact"><div class="k">종료 시점</div><div class="v inline">${fmtTime(u.expires_at)}
           <button class="btn small" id="extendBtn">변경</button>${u.status === 'active' ? '<button class="btn small danger" id="endNow">지금 종료</button>' : ''}</div></div>
         <div class="fact"><div class="k">처음 연결 / 마지막 확인</div><div class="v">${fmtTime(u.activated_at)} / ${fmtTime(u.last_seen_at)}</div></div>
@@ -307,8 +307,20 @@ function presets(container) {
 }
 document.querySelectorAll('.presets').forEach(presets);
 
+const REPO = 'https://github.com/hack-vibe-x/hack-session-relay';
+const ONE_LINE = 'curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main/install.sh | sh -s -- ';
 function instructions(u) {
-  return `세션 기록 연동 안내\n\n1) Claude Code 또는 Codex에서 session-relay-init 을 실행하세요.\n2) 코드를 물어보면 아래 코드를 입력하세요.\n\n코드: ${u.code}\n사용 기간: ${fmtDate(u.expires_at)}까지`;
+  return `[세션 기록 연동 안내]
+
+접속 코드: ${u.code}  (${fmtDate(u.expires_at)}까지)
+
+설치 방법 (둘 중 하나)
+1) Claude Code나 Codex에 이 안내문을 통째로 붙여넣고 "설치해줘"라고 하세요.
+   설치 주소: ${REPO}
+2) 터미널에 아래 한 줄을 붙여넣으세요.
+   ${ONE_LINE}${u.code}
+
+설치하면 이 컴퓨터의 Claude Code·Codex 대화가 지금 한 번, 그 뒤로 하루 한 번 전송되고 종료일이 지나면 저절로 멈춥니다.`;
 }
 
 // ----- events -----
@@ -342,6 +354,7 @@ $('#extendForm').addEventListener('submit', async e => {
 
 $('#detail').addEventListener('click', async e => {
   const t = e.target;
+  if (t.dataset.guide) { navigator.clipboard.writeText(instructions(state.sel)); toast('안내문을 복사했습니다'); return; }
   if (t.dataset.copy) { navigator.clipboard.writeText(t.dataset.copy); toast('코드를 복사했습니다'); return; }
   if (t.dataset.view) { state.view = t.dataset.view; localSet('view', state.view); renderDetail(); return; }
   if (t.dataset.month) { state.month = new Date(state.month.getFullYear(), state.month.getMonth() + Number(t.dataset.month), 1); renderDetail(); return; }
