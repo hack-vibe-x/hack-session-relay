@@ -38,6 +38,7 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import redact  # noqa: E402
 import sources  # noqa: E402
 
 REPO_URL = "https://github.com/hack-vibe-x/hack-session-relay"
@@ -61,8 +62,10 @@ MESSAGES = {
                     "Could not reach the server {server}. Nothing was installed; try again later: {e}"),
     "confirmed": ("접속 코드 확인: 사용자 {user}, {end}까지 사용.", "Code confirmed: user {user}, until {end}."),
     "never": ("기한 없음", "no end"),
-    "notice": ("이 컴퓨터의 Claude Code·Codex 대화를 지금 서버로 보내고, 이후 하루 한 번 보냅니다. 종료일이 지나면 저절로 멈춥니다.",
-               "This computer's Claude Code and Codex conversations are sent now, then once a day, until the end date."),
+    "notice": ("이 컴퓨터의 Claude Code·Codex 대화를 지금 서버로 보내고, 이후 하루 한 번 보냅니다. "
+               "API 키·토큰·비밀번호 같은 민감 정보는 이 컴퓨터에서 가린 뒤 보냅니다. 종료일이 지나면 저절로 멈춥니다.",
+               "This computer's Claude Code and Codex conversations are sent now, then once a day, until the end date. "
+               "API keys, tokens, passwords and other secrets are masked on this computer before sending."),
     "found": ("세션 파일 {n}개를 찾았습니다 (Claude Code {c}, Codex {x}).",
               "Found {n} session files (Claude Code {c}, Codex {x})."),
     "job_ok": ("매일 동기화 작업을 등록했습니다 (로그인할 때, 하루 한 번).", "Registered the daily job (at login, once a day)."),
@@ -112,7 +115,7 @@ def reason_text(reason):
     key = {"expired": "reason.expired", "invalid": "reason.invalid", "stopped by user": "reason.user"}.get(reason)
     return t(key) if key else reason
 
-VERSION = "0.2.0"
+VERSION = "0.4.0"
 PREFIX = "[session-relay]"
 LABEL = "io.session-relay.sync"
 TIMEOUT = 180
@@ -291,7 +294,7 @@ def copy_app():
         skill = skill_source()
         shutil.rmtree(dest, ignore_errors=True)
         os.makedirs(dest)
-        for name in ("relay.py", "sources.py", "defaults.json"):
+        for name in ("relay.py", "sources.py", "media.py", "redact.py", "defaults.json"):
             if os.path.exists(os.path.join(src, name)):
                 shutil.copy2(os.path.join(src, name), os.path.join(dest, name))
         if skill:
@@ -456,7 +459,8 @@ def upload(cfg, entry, day, piece, cwd):
     if len(body) > MAX_SLICE_GZ:
         raise ValueError("slice too large (%d MB compressed)" % (len(body) // 2 ** 20))
     meta = {"cwd": cwd, "lines": piece["lines"], "first": piece["first"], "last": piece["last"],
-            "sha256": piece["sha256"], "bytes": len(piece["data"])}
+            "sha256": piece["sha256"], "bytes": len(piece["data"]), "media_removed": piece.get("media", 0),
+            "media_stripped": 1, "secrets_redacted": piece.get("secrets", 0), "redacted": redact.VERSION}
     route = "/v1/sessions/%s/%s/%s" % (day, entry["tool"], urllib.parse.quote(entry["session_id"]))
     request(cfg, "PUT", route, body, {
         "Content-Type": "application/x-ndjson",
@@ -474,6 +478,18 @@ def sync(cfg, reason):
         save_config(cfg)
 
     state = load_state()
+    epoch = me.get("epoch", 1)
+    if state.get("epoch", 1) != epoch:
+        # The server lost this user's files or the admin asked for them again: forget what was sent.
+        log("server asked for a full resend (epoch %s -> %s)" % (state.get("epoch", 1), epoch))
+        state["slices"] = {}
+        state["files"] = {}
+    state["epoch"] = epoch
+    if state.get("redact_version") != redact.VERSION:
+        # New masking rules (or a client from before masking): read every session again. Slices that come out
+        # different are sent again and overwrite the server's copy; the others match their stored hash and stay.
+        state["files"] = {}
+        state["redact_version"] = redact.VERSION
     files = state.setdefault("files", {})
     sent = state.setdefault("slices", {})
     result = {"started_at": now_utc().isoformat(), "reason": reason, "sessions": 0, "slices": 0,

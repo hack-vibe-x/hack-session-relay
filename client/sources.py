@@ -13,6 +13,9 @@ import json
 import os
 import re
 
+import media
+import redact
+
 # Internal dumps, not conversation. In the largest sessions on one machine they were more than half the bytes.
 DROP_TYPES = {"api-request", "api-request-blob", "api-request-shape", "file-history-snapshot"}
 UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
@@ -121,7 +124,8 @@ def read_slices(entry):
     """Reads one session file and splits it by day.
 
     Returns {"automated": bool, "cwd": str|None, "days": {date: {"data": bytes, "lines": n, "first": ts, "last": ts}}}.
-    An unfinished last line (the tool is still writing it) is left for the next run.
+    An unfinished last line (the tool is still writing it) is left for the next run. Images and other base64
+    attachments are replaced with a short text note (see media.py), and secrets are masked (see redact.py).
     """
     tool = entry["tool"]
     days = {}
@@ -130,10 +134,12 @@ def read_slices(entry):
     automated = False
     cwd = None
 
-    def put(day, raw, stamp):
-        slot = days.setdefault(day, {"parts": [], "lines": 0, "first": None, "last": None})
+    def put(day, raw, stamp, removed=0, masked=0):
+        slot = days.setdefault(day, {"parts": [], "lines": 0, "first": None, "last": None, "media": 0, "secrets": 0})
         slot["parts"].append(raw)
         slot["lines"] += 1
+        slot["media"] += removed
+        slot["secrets"] += masked
         if isinstance(stamp, str):
             slot["first"] = slot["first"] or stamp
             slot["last"] = stamp
@@ -152,9 +158,14 @@ def read_slices(entry):
                 raw += b"\n"
             stamp = None
             day = None
+            removed = 0
             if isinstance(obj, dict):
                 if obj.get("type") in DROP_TYPES:
                     continue
+                raw, removed = media.strip_line(raw, obj)
+            # Every line, also ones that are not JSON objects. obj is stale once media.strip_line changed the line.
+            raw, masked = redact.redact_line(raw, obj if obj is not None and not removed else None)
+            if isinstance(obj, dict):
                 if not automated and _automated(tool, obj):
                     automated = True
                 if cwd is None:
@@ -164,23 +175,24 @@ def read_slices(entry):
                 day = local_day(stamp)
             if day:
                 if pending:
-                    for p in pending:
-                        put(day, p, None)
+                    for p, m in pending:
+                        put(day, p, None, 0, m)
                     pending = []
                 current = day
-                put(day, raw, stamp)
+                put(day, raw, stamp, removed, masked)
             elif current:
-                put(current, raw, None)
+                put(current, raw, None, removed, masked)
             else:
-                pending.append(raw)
+                pending.append((raw, masked))
     if pending:
         day = datetime.date.fromtimestamp(os.path.getmtime(entry["path"])).isoformat()
-        for p in pending:
-            put(day, p, None)
+        for p, m in pending:
+            put(day, p, None, 0, m)
 
     out = {}
     for day, slot in days.items():
         data = b"".join(slot["parts"])
         out[day] = {"data": data, "sha256": hashlib.sha256(data).hexdigest(), "lines": slot["lines"],
-                    "first": slot["first"], "last": slot["last"]}
+                    "first": slot["first"], "last": slot["last"], "media": slot["media"],
+                    "secrets": slot["secrets"]}
     return {"automated": automated, "cwd": cwd if isinstance(cwd, str) else None, "days": out}

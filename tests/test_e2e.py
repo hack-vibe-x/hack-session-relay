@@ -28,6 +28,8 @@ CLIENT_PY = "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else sys.ex
 KEY = "test-admin-key"
 SID = "11111111-2222-3333-4444-555555555555"
 CODEX_SID = "01a1df73-1900-7c23-a90a-0f57f51779ee"
+PNG = "iVBORw0KGgo" + "A" * 4000
+SECRET = "sk-proj-abc123DEF456ghi789JKL012mno"
 
 
 def free_port():
@@ -93,9 +95,11 @@ class E2E(unittest.TestCase):
         with open(self.session, "w") as f:
             f.write(line(type="session-owner", sessionId=SID))  # No timestamp: goes with the first dated line.
             f.write(line(type="user", timestamp=utc("2026-11-16 23:40"), cwd="/Users/me/proj", entrypoint="cli",
-                         message={"role": "user", "content": "hello"}))
+                         message={"role": "user", "content": [{"type": "text", "text": "hello"}, {
+                             "type": "image", "source": {"type": "base64", "media_type": "image/png", "data": PNG}}]}))
             f.write(line(type="api-request", timestamp=utc("2026-11-16 23:41"), body="x" * 5000))  # Dropped.
-            f.write(line(type="assistant", timestamp=utc("2026-11-16 23:55"), message={"content": "hi"}))
+            f.write(line(type="assistant", timestamp=utc("2026-11-16 23:55"),
+                         message={"content": "hi, OPENAI_API_KEY=" + SECRET}))
             f.write(line(type="user", timestamp=utc("2026-11-17 00:10"), message={"content": "after midnight"}))
         with open(os.path.join(proj, SID, "subagents", "agent-1.jsonl"), "w") as f:
             f.write(line(type="user", timestamp=utc("2026-11-16 10:00")))
@@ -177,7 +181,19 @@ class E2E(unittest.TestCase):
         self.assertIn("01012345678/2026-11-18/_index.json", names)
         body = zipfile.ZipFile(io.BytesIO(zipped)).read("01012345678/2026-11-17/claude_%s.jsonl" % SID).decode()
         self.assertIn("after midnight", body)
+        day16 = zipfile.ZipFile(io.BytesIO(zipped)).read("01012345678/2026-11-16/claude_%s.jsonl" % SID).decode()
+        self.assertIn("[image omitted: image/png", day16)  # Images become a text note before sending.
+        self.assertNotIn("A" * 100, day16)
+        self.assertIn("OPENAI_API_KEY=[redacted: api key]", day16)  # Secrets are masked before sending.
+        self.assertNotIn(SECRET, day16)
         self.assertNotIn("unfinished", body)
+
+        # The server asks for everything again (it lost the files): the next sync resends all slices.
+        call(self.url + "/admin/users/" + uid, "PATCH", {"resend": True})
+        rc, out = self.relay("sync", now="2026-11-18 10:00")
+        self.assertIn("Synced: 4 slices from 2 sessions", out)
+        rc, out = self.relay("sync", now="2026-11-18 10:05")
+        self.assertIn("Synced: 0 slices", out)
 
         # The admin ends the code. The next daily tick hears it from the server and stops for good.
         call(self.url + "/admin/users/" + uid, "PATCH", {"expires_at": "now"})
@@ -219,6 +235,7 @@ class E2E(unittest.TestCase):
         for f in [wrapper, os.path.join(relay_home, "README.md"), os.path.join(relay_home, "app", "relay.py")] + skills:
             self.assertTrue(os.path.exists(f), f)
         res = subprocess.run([wrapper, "status", "--json"], env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(res.returncode, 0, res.stderr)
         self.assertEqual(json.loads(res.stdout)["slices_sent"], 3)
         res = subprocess.run([wrapper, "uninstall"], env=self.env, capture_output=True, text=True, timeout=60)
         self.assertIn("Removed", res.stdout)

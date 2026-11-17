@@ -11,7 +11,7 @@ set -eu
 
 REPO="${SESSION_RELAY_REPO:-hack-vibe-x/hack-session-relay}"
 REF="${SESSION_RELAY_REF:-main}"
-FILES="client/relay.py client/sources.py client/defaults.json skill/SKILL.md"
+FILES="client/relay.py client/sources.py client/media.py client/redact.py client/defaults.json skill/SKILL.md"
 
 is_ko() {
   case "${SESSION_RELAY_LANG:-${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}}" in ko*|KO*) return 0 ;; esac
