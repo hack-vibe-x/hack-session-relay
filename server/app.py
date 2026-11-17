@@ -20,6 +20,9 @@ Admin API (Authorization: Bearer <ADMIN_KEY>):
   GET   /admin/users/<id>/days                dates with uploads
   GET   /admin/users/<id>/days/<date>         sessions of one date
   GET   /admin/users/<id>/download?from=&to=  zip of the dates in the range (one date: from=to)
+  GET   /admin/client                         the client release offered to computers
+  PUT   /admin/client {version, ref, files}   offer a release: version, a 40-hex commit of the GitHub repository
+                                              and {path: sha256} for its files (scripts/release.py sends this)
 """
 import datetime
 import gzip
@@ -53,6 +56,8 @@ DATE = re.compile(r"^\d{4}-\d\d-\d\d$")
 SESSION = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 USER_ID = re.compile(r"^u_[0-9a-f]{10}$")
 TOOLS = ("claude", "codex")
+RELEASE_FILE = re.compile(r"^(client/[a-z_]+\.(?:py|json)|skill/SKILL\.md)$")
+CLIENT_AGENT = re.compile(r"session-relay/([0-9]+(?:\.[0-9]+)*)")
 
 _lock = threading.Lock()
 _files_lock = threading.Lock()  # Uploads and the image cleanup never write the same session file at once.
@@ -97,6 +102,18 @@ def phone_hint(phone):
 
 
 # ---------- Store ----------
+
+def release_file():
+    return os.path.join(DATA_DIR, "client.json")
+
+
+def load_release():
+    try:
+        with open(release_file(), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
 
 def users_file():
     return os.path.join(DATA_DIR, "users.json")
@@ -260,16 +277,19 @@ class Handler(BaseHTTPRequestHandler):
                                         "error": "this code has ended"})
 
         if method == "GET" and parts == ["me"]:
+            agent = CLIENT_AGENT.search(self.headers.get("User-Agent") or "")
             with _lock:
                 users = load_users()
                 users[uid]["last_seen_at"] = iso(now())
+                if agent:
+                    users[uid]["client_version"] = agent.group(1)
                 if not users[uid].get("activated_at"):
                     users[uid]["activated_at"] = iso(now())
                 save_users(users)
             # epoch: raised when the server lost or dropped this user's files; clients then send everything again.
             return self.send_json(200, {"status": "active", "user_id": uid, "phone_hint": phone_hint(user["phone"]),
                                         "expires_at": user.get("expires_at"), "epoch": user.get("epoch", 1),
-                                        "server_time": iso(now())})
+                                        "client": load_release(), "server_time": iso(now())})
 
         if method == "PUT" and len(parts) == 4 and parts[0] == "sessions":
             _, day, tool, sid = parts
@@ -308,7 +328,10 @@ class Handler(BaseHTTPRequestHandler):
             with _lock:
                 users = load_users()
                 users[uid]["last_sync_at"] = iso(now())
-                users[uid]["last_sync"] = {k: report.get(k) for k in ("reason", "sessions", "slices", "bytes")}
+                users[uid]["last_sync"] = {k: report.get(k) for k in ("reason", "sessions", "slices", "bytes",
+                                                                       "client_version")}
+                if report.get("client_version"):
+                    users[uid]["client_version"] = str(report["client_version"])[:20]
                 save_users(users)
             return self.send_json(200, {"ok": True})
 
@@ -317,6 +340,21 @@ class Handler(BaseHTTPRequestHandler):
     # ----- admin -----
 
     def admin_api(self, method, parts, query):
+        if parts == ["client"] and method == "GET":
+            return self.send_json(200, {"client": load_release()})
+
+        if parts == ["client"] and method == "PUT":
+            data = self.read_json()
+            version, ref, files = str(data.get("version") or ""), str(data.get("ref") or ""), data.get("files")
+            if not re.match(r"^[0-9]+(\.[0-9]+)*$", version) or not re.match(r"^[0-9a-f]{40}$", ref):
+                raise ValueError("version (like 0.6.0) and a 40-character commit ref are required")
+            if not isinstance(files, dict) or "client/relay.py" not in files or any(
+                    not RELEASE_FILE.match(k) or not re.match(r"^[0-9a-f]{64}$", str(v)) for k, v in files.items()):
+                raise ValueError("files must map client/*.py, client/*.json and skill/SKILL.md to sha256")
+            release = {"version": version, "ref": ref, "files": files, "released_at": iso(now())}
+            write_atomic(release_file(), json.dumps(release, indent=1).encode())
+            return self.send_json(200, {"client": release})
+
         if parts == ["users"] and method == "GET":
             users = load_users()
             listed = [public_user(uid, u) for uid, u in users.items()]

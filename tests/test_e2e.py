@@ -5,6 +5,11 @@ python3 (3.9) when it exists. Nothing touches the real ~/.claude, ~/.codex or la
   python3 tests/test_e2e.py
 """
 import datetime
+import functools
+import hashlib
+import re
+import threading
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import io
 import json
 import os
@@ -242,6 +247,67 @@ class E2E(unittest.TestCase):
         self.assertIn("Removed", res.stdout)
         for f in [relay_home] + skills:
             self.assertFalse(os.path.exists(f), f)
+
+    def test_auto_update(self):
+        uid, code = self.issue()
+        rc, out = self.run_install(code, "--server", self.url, "--no-job", "--foreground")
+        self.assertEqual(rc, 0, out)
+        relay_home = self.env["SESSION_RELAY_HOME"]
+        wrapper = os.path.join(relay_home, "relay")
+        # A release the way GitHub would serve it: <base>/<commit>/<path>.
+        ref = "ab" * 20
+        root = os.path.join(self.home, "release")
+        files = {}
+        for rel in ("client/relay.py", "client/sources.py", "client/media.py", "client/redact.py",
+                    "client/defaults.json", "skill/SKILL.md"):
+            with open(os.path.join(ROOT, rel), "rb") as f:
+                data = f.read()
+            if rel == "client/relay.py":
+                data = re.sub(rb'VERSION = "[0-9.]+"', b'VERSION = "9.9.9"', data, count=1)
+            dest = os.path.join(root, ref, rel)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(data)
+            files[rel] = hashlib.sha256(data).hexdigest()
+        handler = functools.partial(SimpleHTTPRequestHandler, directory=root)
+        handler.log_message = lambda *a: None
+        static = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=static.serve_forever, daemon=True).start()
+        self.addCleanup(static.shutdown)
+        env = dict(self.env, SESSION_RELAY_UPDATE_BASE="http://127.0.0.1:%d/" % static.server_address[1])
+
+        def run(*args, now):
+            res = subprocess.run([wrapper] + list(args), env=dict(env, SESSION_RELAY_NOW=utc(now)),
+                                 capture_output=True, text=True, timeout=120)
+            return res.stdout + res.stderr
+
+        def installed_version():
+            return subprocess.run([wrapper, "version"], env=env, capture_output=True, text=True).stdout.strip()
+
+        old = installed_version()
+        # A file that does not match the server's hash: no update, the sync still runs on the old version.
+        bad = dict(files, **{"client/media.py": "0" * 64})
+        call(self.url + "/admin/client", "PUT", {"version": "9.9.9", "ref": ref, "files": bad})
+        out = run("sync", now="2026-11-18 09:00")
+        self.assertIn("Could not update to 9.9.9", out)
+        self.assertIn("Synced", out)
+        self.assertEqual(installed_version(), old)
+        self.assertFalse(os.path.exists(os.path.join(relay_home, "app.new")))
+
+        # The real release: check the code, update, then sync with the new code and record it.
+        call(self.url + "/admin/client", "PUT", {"version": "9.9.9", "ref": ref, "files": files})
+        out = run("sync", now="2026-11-19 09:00")
+        self.assertIn("Updated the client from %s to 9.9.9" % old, out)
+        self.assertIn("Synced", out)
+        self.assertEqual(installed_version(), "9.9.9")
+        self.assertTrue(os.path.exists(os.path.join(relay_home, "app.prev", "relay.py")))
+        users = {u["id"]: u for u in call(self.url + "/admin/users")["users"]}
+        self.assertEqual(users[uid]["client_version"], "9.9.9")
+        with open(os.path.join(relay_home, "state.json")) as f:
+            self.assertEqual(json.load(f)["update"]["to"], "9.9.9")
+        # Up to date now: no second update.
+        out = run("sync", now="2026-11-19 10:00")
+        self.assertNotIn("Updated", out)
 
     def test_install_needs_code_without_terminal(self):
         rc, out = self.run_install("--server", self.url)

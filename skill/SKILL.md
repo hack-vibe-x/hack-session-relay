@@ -8,7 +8,7 @@ license: Apache-2.0
 
 session-relay was installed on this computer with `install.sh` and a code from the admin. A background job sends
 the Claude Code and Codex conversation records to the relay server at login and then once a day, until the code's
-end date, when it stops by itself. Everything is in `~/.session-relay/`; the command is `~/.session-relay/relay`.
+end date, when it stops by itself. It also updates itself when the admin releases a new version. Everything is in `~/.session-relay/`; the command is `~/.session-relay/relay`.
 Its messages follow the locale (Korean or English); pass them on in the language the person uses with you.
 
 | The person asks | Run |
@@ -18,6 +18,7 @@ Its messages follow the locale (Korean or English); pass them on in the language
 | use a new code / start again after stop | `~/.session-relay/relay init --code <code they typed>` |
 | stop sending | `~/.session-relay/relay stop` |
 | remove it | `~/.session-relay/relay uninstall` |
+| which version runs here | `~/.session-relay/relay version` |
 
 If `~/.session-relay/relay` does not exist, it is not installed: see https://github.com/hack-vibe-x/hack-session-relay.
 

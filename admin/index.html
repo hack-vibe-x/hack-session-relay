@@ -191,6 +191,11 @@ async function loadConfig() {
   const c = await api('/config').catch(e => ({ error: e.message }));
   state.server = c.server_url || '';
   $('#server').textContent = c.ready ? c.server_url : '설정 필요: admin/config.json';
+  if (c.ready) {
+    const r = await api('/client').catch(() => ({}));
+    state.release = r.client || null;
+    if (state.release) $('#server').textContent += ` · 배포 클라이언트 ${state.release.version}`;
+  }
 }
 
 async function loadUsers() {
@@ -235,6 +240,7 @@ function renderDetail() {
           <button class="btn small" id="extendBtn">변경</button>${u.status === 'active' ? '<button class="btn small danger" id="endNow">지금 종료</button>' : ''}</div></div>
         <div class="fact"><div class="k">처음 연결 / 마지막 확인</div><div class="v">${fmtTime(u.activated_at)} / ${fmtTime(u.last_seen_at)}</div></div>
         <div class="fact"><div class="k">마지막 동기화</div><div class="v">${fmtTime(u.last_sync_at)}${ls.slices != null ? ` · ${ls.slices}개 조각` : ''}</div></div>
+        <div class="fact"><div class="k">클라이언트 버전</div><div class="v">${esc(u.client_version || '—')}${state.release && u.client_version && u.client_version !== state.release.version ? ` <span class="badge off">최신 ${esc(state.release.version)} 대기</span>` : ''}</div></div>
         <div class="fact"><div class="k">쌓인 기록</div><div class="v">${u.days_count}일 · 세션 ${u.sessions_total} · 저장 ${size(u.bytes_total)}</div></div>
       </div>
     </div>

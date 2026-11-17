@@ -62,13 +62,32 @@ Messages are in Korean when the system language is Korean, otherwise in English.
 
 ## How it works
 
-- **Once a day**: if today was already sent, it ends without calling the server. Days when the computer was off are sent at the next login.
+- **Once a day, in this order**: the job wakes at login and every hour.
+  1. If today was already sent, or the code's end date has passed, it ends without calling the server.
+  2. It asks the server whether the code is still valid.
+  3. If the server offers a newer client, it updates first (see [Updates](#updates)).
+  4. It sends what is new.
+  5. It records the day as sent in `~/.session-relay/state.json` and reports to the server (the admin page shows the last sync and the client version). The day counts as sent only when the run finished, so a failed run is retried the next hour.
+
+  Days when the computer was off are sent at the next login.
 - **Sessions across midnight**: every line is filed under the local date of its own time. A session used from the night of the 17th into the early 18th lands in both the 17th and the 18th folders.
 - **No duplicates**: the sha256 of every (session, date) slice is kept in `~/.session-relay/state.json`, and only changed slices are sent again. The server overwrites the same slice. "Today" sent in the morning is replaced the next day by the full day.
 - **Ending**: once the stored end time has passed, it stops without calling the server. It also stops when the server says the code has ended or is unknown. Stopping removes the launchd job too.
 - **Secrets and personal information are masked before sending**: see [Sensitive information](#sensitive-information) below.
+- **Images become text**: images and other base64 attachments (screenshots, PDFs) are replaced on the user's computer with a note such as `[image omitted: image/png, 245 KB]`, so they are never uploaded. On one machine this cut the compressed upload by about 80%. The server does the same for uploads from older clients and for files stored before.
+- **Resend on request**: when the server's copy is lost, the admin can raise the user's epoch (`PATCH /admin/users/<id> {"resend": true}`), and the computer sends everything again at its next sync.
 - **Not sent**: subagent records, sessions run by `claude -p` and `codex exec`, copies Codex imported from Claude Code, and the `api-request*` and `file-history-snapshot` lines inside a session.
 - **Platforms**: the daily job is registered automatically on macOS only. The client uses only the Python standard library and runs on the python3 that ships with macOS (3.9).
+
+### Updates
+
+Installed computers update themselves; nobody has to reinstall.
+
+- The admin releases a version with `scripts/release.py` (see [Releasing a client update](#releasing-a-client-update)). Until then, pushing to GitHub changes nothing on installed computers.
+- At its daily check the computer sees the released version in the server's answer. If it is newer, it downloads that commit's files from this GitHub repository and checks each against the sha256 the server gave. It then runs the new code once as a test, swaps it in (the previous version stays in `~/.session-relay/app.prev`), and syncs with the new code.
+- Files must come from this repository at the named commit and match the server's hashes, so neither GitHub nor the server alone can change the code that runs on users' computers.
+- If anything fails (download, hash, test run), it keeps the current version, logs why, syncs as usual, and tries again the next day.
+- Computers installed before 0.6.0 have no updater and need one manual reinstall.
 
 ### Sensitive information
 
@@ -100,16 +119,27 @@ Masking works by pattern (`client/redact.py`). A secret in an unusual format tha
 - Data is kept on the volume at `/data`.
 - The server address is also in `client/defaults.json`.
 
-To redeploy after changing the code, run `cd server && railway up`. To set it up from scratch:
+To redeploy after changing the code, run `cd server && railway up`. On Railway the server refuses to start unless `/data` is a mounted volume, so it never writes records to the container's temporary disk. The first deployment did exactly that and lost everything on the next deploy. To set it up from scratch:
 
 ```bash
 cd server
 railway init --name session-relay
 railway add --service session-relay --variables "ADMIN_KEY=$(openssl rand -hex 24)"
-railway volume add --mount-path /data     # without it, records are lost on every deploy
+railway volume add --mount-path /data     # wait until it is attached before `railway up`
 railway up
 railway domain
 ```
+
+### Releasing a client update
+
+1. Raise `VERSION` in `client/relay.py`, run the tests, commit and push to `main`.
+2. Check, then release:
+   ```bash
+   python3 scripts/release.py --dry-run
+   python3 scripts/release.py
+   ```
+   It refuses when `client/` or `skill/` has uncommitted changes, when the commit is not on GitHub, when GitHub serves different files, or when the version is not newer than the released one.
+3. Computers update at their next daily sync. The admin page shows the released version at the top and each user's client version, with a "waiting" badge until that user has updated.
 
 ### Admin page
 
@@ -120,6 +150,7 @@ python3 admin/admin.py                            # http://127.0.0.1:8787
 
 - **Issue a code**: enter a phone number, a memo and an end date to get the code and the message for the user. The message can be copied again later from the user's page. The code itself is kept only in `admin/data/codes.json`; the server keeps only its hash.
 - **Change the end date / End now**: the user's computer learns it at its next sync and stops by itself.
+- **Client version**: each user's page shows the client version that computer runs.
 - **Records**: switch between a calendar and a list. Click a date to see its sessions and a download button, or pick a range to download it all at once. The zip holds `<phone>/<date>/<tool>_<session id>.jsonl` and an `_index.json` per date.
 
 ## Tests
@@ -127,9 +158,12 @@ python3 admin/admin.py                            # http://127.0.0.1:8787
 ```bash
 python3 tests/test_e2e.py
 python3 tests/test_redact.py
+python3 tests/test_media.py
 ```
 
-`test_redact.py` checks which secrets are masked and that ordinary code and prose are left alone. `test_e2e.py` runs a real server process against a fake home folder (fake `~/.claude` and `~/.codex`) and checks: issue → install with `install.sh` → midnight split → resync → ending → zip → admin page → uninstall.
+- `test_redact.py` checks which secrets are masked and that ordinary code and prose are left alone.
+- `test_media.py` checks that every image shape found in real sessions becomes a note, that the server strips uploads from older clients and cleans stored files, and that `client/media.py` and `server/media.py` are the same.
+- `test_e2e.py` runs a real server process against a fake home folder (fake `~/.claude` and `~/.codex`). It checks: issue → install with `install.sh` → midnight split → resync → resend on request → auto-update (a release with a wrong hash is refused) → ending → zip → admin page → uninstall.
 
 ## License
 
@@ -199,13 +233,32 @@ curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main
 
 ## 동작
 
-- **하루 한 번**: 그날 이미 보냈으면 서버를 부르지 않고 끝난다. 컴퓨터가 꺼져 있던 날은 다음 로그인 때 보낸다.
+- **하루 한 번, 이 순서로**: 작업은 로그인할 때와 매시 깨어난다.
+  1. 그날 이미 보냈거나 종료일이 지났으면 서버를 부르지 않고 끝난다.
+  2. 서버에 코드가 아직 유효한지 묻는다.
+  3. 서버가 더 새 클라이언트를 알려 주면 먼저 업데이트한다([업데이트](#업데이트) 참고).
+  4. 새로 생긴 것을 보낸다.
+  5. 그날을 보냄으로 `~/.session-relay/state.json`에 기록하고 서버에 보고한다. 관리자 웹에는 마지막 동기화와 클라이언트 버전이 표시된다. 끝까지 성공해야 보냄으로 기록되므로, 실패하면 다음 정각에 다시 시도한다.
+
+  컴퓨터가 꺼져 있던 날은 다음 로그인 때 보낸다.
 - **날짜에 걸친 세션**: 각 줄을 그 줄의 시각(로컬 날짜)으로 나눈다. 17일 밤부터 18일 새벽까지 쓴 세션은 17일과 18일 폴더에 나뉘어 들어간다.
 - **중복 방지**: (세션, 날짜) 조각마다 sha256을 `~/.session-relay/state.json`에 기록하고, 바뀐 조각만 다시 보낸다. 서버는 같은 조각을 덮어쓴다. 아침에 보낸 "오늘" 조각은 다음 날 완성본으로 바뀐다.
 - **종료**: 저장된 종료 시점이 지나면 서버를 부르지 않고 멈춘다. 서버가 종료됐다거나 코드를 모른다고 답해도 멈춘다. 멈출 때 launchd 작업도 지운다.
 - **비밀값과 개인정보는 가린 뒤 보낸다**: 아래 [민감 정보](#민감-정보)를 보라.
+- **이미지는 글로 바꾼다**: 이미지와 그 밖의 base64 첨부(스크린샷, PDF)는 사용자 컴퓨터에서 `[image omitted: image/png, 245 KB]` 같은 표시로 바뀌어 아예 올라가지 않는다. 한 컴퓨터에서 재 보니 압축 후 업로드가 약 80% 줄었다. 옛 클라이언트가 보낸 업로드와 그 전에 저장된 파일은 서버가 같은 방식으로 바꾼다.
+- **다시 보내기 요청**: 서버의 사본을 잃었을 때 관리자가 그 사용자의 세대 번호(epoch)를 올리면(`PATCH /admin/users/<id> {"resend": true}`), 그 컴퓨터는 다음 동기화 때 전부 다시 보낸다.
 - **보내지 않는 것**: 서브에이전트 기록, `claude -p`와 `codex exec`로 실행된 세션, Codex가 Claude Code에서 가져온 복사본, 세션 안의 `api-request*` 줄과 `file-history-snapshot` 줄.
 - **지원 환경**: 매일 작업은 macOS에서만 자동으로 등록된다. 클라이언트는 Python 표준 라이브러리만 쓰고, 맥 기본 python3(3.9)에서 돈다.
+
+### 업데이트
+
+설치된 컴퓨터는 스스로 업데이트한다. 다시 설치할 필요가 없다.
+
+- 관리자가 `scripts/release.py`로 버전을 내보낸다([클라이언트 업데이트 내보내기](#클라이언트-업데이트-내보내기) 참고). 그 전에는 GitHub에 올려도 설치된 컴퓨터에는 아무 변화가 없다.
+- 하루 한 번 확인할 때 서버의 응답에서 배포된 버전을 본다. 더 새 버전이면 그 커밋의 파일을 이 GitHub 저장소에서 받아, 서버가 준 sha256과 하나씩 대조한다. 그다음 새 코드를 한 번 시험 실행하고, 교체한 뒤(이전 버전은 `~/.session-relay/app.prev`에 남는다) 새 코드로 동기화한다.
+- 파일은 이 저장소의 지정된 커밋에서 받아야 하고 서버의 해시와도 맞아야 한다. 그래서 GitHub나 서버 한쪽만으로는 사용자 컴퓨터에서 도는 코드를 바꿀 수 없다.
+- 받기, 해시 대조, 시험 실행 중 하나라도 실패하면 지금 버전을 유지하고 이유를 로그에 남긴다. 동기화는 평소대로 하고, 업데이트는 다음 날 다시 시도한다.
+- 0.6.0 이전에 설치한 컴퓨터에는 업데이트 기능이 없으므로 한 번은 직접 다시 설치해야 한다.
 
 ### 민감 정보
 
@@ -237,16 +290,27 @@ curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main
 - 데이터는 볼륨 `/data`에 쌓인다.
 - 서버 주소는 `client/defaults.json`에도 들어 있다.
 
-코드를 고친 뒤 다시 배포할 때는 `cd server && railway up`을 실행한다. 처음부터 새로 만들 때의 순서는 아래와 같다.
+코드를 고친 뒤 다시 배포할 때는 `cd server && railway up`을 실행한다. Railway에서 서버는 `/data`가 실제로 붙은 볼륨이 아니면 시작하지 않는다. 기록이 컨테이너의 임시 디스크에 쓰이는 일을 막기 위해서다. 첫 배포가 바로 그렇게 되어 다음 배포 때 기록을 모두 잃었다. 처음부터 새로 만들 때의 순서는 아래와 같다.
 
 ```bash
 cd server
 railway init --name session-relay
 railway add --service session-relay --variables "ADMIN_KEY=$(openssl rand -hex 24)"
-railway volume add --mount-path /data     # 없으면 배포할 때마다 기록이 사라진다
+railway volume add --mount-path /data     # 볼륨이 붙을 때까지 기다린 뒤 railway up
 railway up
 railway domain
 ```
+
+### 클라이언트 업데이트 내보내기
+
+1. `client/relay.py`의 `VERSION`을 올리고, 테스트를 돌린 뒤, 커밋해서 `main`에 올린다.
+2. 확인한 다음 내보낸다.
+   ```bash
+   python3 scripts/release.py --dry-run
+   python3 scripts/release.py
+   ```
+   다음 경우에는 내보내지 않는다: `client/`나 `skill/`에 커밋하지 않은 변경이 있을 때, 그 커밋이 GitHub에 없을 때, GitHub이 다른 파일을 내줄 때, 버전이 지금 배포된 것보다 높지 않을 때.
+3. 각 컴퓨터는 다음 하루 한 번 동기화 때 업데이트한다. 관리자 웹 상단에는 배포된 버전이, 사용자 화면에는 그 사용자의 클라이언트 버전이 나온다. 아직 업데이트하지 않은 사용자에게는 "대기" 표시가 붙는다.
 
 ### 관리자 웹
 
@@ -257,6 +321,7 @@ python3 admin/admin.py                            # http://127.0.0.1:8787
 
 - **새 코드 발행**: 전화번호, 메모, 종료일을 넣으면 코드와 사용자에게 보낼 안내문이 나온다. 안내문은 나중에 사용자 화면에서 다시 복사할 수 있다. 코드 원문은 `admin/data/codes.json`에만 남고, 서버에는 해시만 있다.
 - **종료일 변경 / 지금 종료**: 사용자 컴퓨터는 다음 동기화 때 이를 알고 스스로 멈춘다.
+- **클라이언트 버전**: 사용자 화면에 그 컴퓨터가 쓰는 클라이언트 버전이 나온다.
 - **대화 기록**: 달력과 목록을 오갈 수 있다. 날짜를 누르면 그날의 세션 목록과 다운로드 버튼이 나오고, 기간을 정해 한꺼번에 받을 수도 있다. zip 안은 `<전화번호>/<날짜>/<도구>_<세션ID>.jsonl`과 날짜별 `_index.json`으로 되어 있다.
 
 ## 테스트
@@ -264,9 +329,12 @@ python3 admin/admin.py                            # http://127.0.0.1:8787
 ```bash
 python3 tests/test_e2e.py
 python3 tests/test_redact.py
+python3 tests/test_media.py
 ```
 
-`test_redact.py`는 어떤 비밀값이 가려지는지, 그리고 평범한 코드와 문장은 그대로 남는지 확인한다. `test_e2e.py`는 실제 서버 프로세스와 가짜 홈 폴더(가짜 `~/.claude`, `~/.codex`)로 다음 흐름을 확인한다: 발행 → `install.sh` 설치 → 자정 분할 → 재동기화 → 종료 → zip → 관리자 웹 → 삭제.
+- `test_redact.py`: 어떤 비밀값이 가려지는지, 평범한 코드와 문장은 그대로 남는지 확인한다.
+- `test_media.py`: 실제 세션에서 찾은 이미지 모양이 모두 표시로 바뀌는지, 서버가 옛 클라이언트의 업로드와 이미 저장된 파일을 정리하는지, `client/media.py`와 `server/media.py`가 같은지 확인한다.
+- `test_e2e.py`: 실제 서버 프로세스와 가짜 홈 폴더(가짜 `~/.claude`, `~/.codex`)로 다음 흐름을 확인한다. 발행 → `install.sh` 설치 → 자정 분할 → 재동기화 → 다시 보내기 요청 → 자동 업데이트(해시가 틀린 배포는 거부) → 종료 → zip → 관리자 웹 → 삭제.
 
 ## 라이선스
 

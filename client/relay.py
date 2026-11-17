@@ -10,6 +10,9 @@ Standard library only, Python 3.9+ (the python3 that ships with macOS). Installe
   status [--json]    Show the state.
   stop               Stop for good on this computer: remove the job and stop calling the server.
   uninstall          stop, then remove ~/.session-relay and the optional skill.
+  version            print the client version.
+
+Each daily run: is the code valid -> is a newer client released (then update, see maybe_update) -> sync -> record.
 
 Nothing is sent twice. Each session is split into one slice per local date (a session used across midnight gives
 two slices) and the sha256 of every uploaded slice is kept. A slice is sent again only when it changed, which is
@@ -24,9 +27,11 @@ import argparse
 import contextlib
 import datetime
 import gzip
+import hashlib
 import json
 import os
 import plistlib
+import re
 import shutil
 import ssl
 import subprocess
@@ -83,6 +88,9 @@ MESSAGES = {
     "stopped": ("멈췄습니다 ({reason}). 이 컴퓨터는 더 이상 서버를 호출하지 않습니다. {detail}",
                 "Stopped ({reason}). This computer no longer calls the server. {detail}"),
     "ended_at": ("접속 코드가 {end}에 끝났습니다.", "The code ended at {end}."),
+    "updated": ("클라이언트를 {old}에서 {new}(으)로 업데이트했습니다.", "Updated the client from {old} to {new}."),
+    "update_failed": ("{version} 업데이트에 실패해 지금 버전으로 계속합니다: {e}",
+                      "Could not update to {version}; continuing with this version: {e}"),
     "uninstalled": ("삭제했습니다: {paths}", "Removed: {paths}"),
     "reason.expired": ("기간 종료", "ended"),
     "reason.invalid": ("코드 없음", "unknown code"),
@@ -115,13 +123,19 @@ def reason_text(reason):
     key = {"expired": "reason.expired", "invalid": "reason.invalid", "stopped by user": "reason.user"}.get(reason)
     return t(key) if key else reason
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 PREFIX = "[session-relay]"
 LABEL = "io.session-relay.sync"
 TIMEOUT = 180
 MAX_SLICE_GZ = 95 * 1024 * 1024
 SAVE_EVERY = 25
 STALE_LOCK = 6 * 60 * 60
+# Updates come only from this repository, at the commit the server names, and must match the server's sha256 list:
+# neither GitHub nor the server alone can change the code that runs here.
+UPDATE_BASE = "https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/"
+UPDATE_FILE = re.compile(r"^(client/[a-z_]+\.(?:py|json)|skill/SKILL\.md)$")
+UPDATE_REF = re.compile(r"^[0-9a-f]{40}$")
+MAX_UPDATE_FILE = 4 * 1024 * 1024
 
 
 # ---------- Paths and files ----------
@@ -353,8 +367,11 @@ Commands (also for AI agents asked about "session relay"):
     ~/.session-relay/relay stop              # stop for good on this computer
     ~/.session-relay/relay init --code SR-…  # change the code, or start again after stop
     ~/.session-relay/relay uninstall         # stop and remove everything here
+    ~/.session-relay/relay version           # client version
 
-Files: config.json (code, end date), state.json (what was sent), logs/relay.log.
+It updates itself when the admin releases a new version; the previous version is kept in app.prev.
+
+Files: config.json (code, end date), state.json (what was sent, last sync, last update), logs/relay.log.
 """ % REPO_URL
 
 
@@ -470,9 +487,9 @@ def upload(cfg, entry, day, piece, cwd):
     return len(body)
 
 
-def sync(cfg, reason):
+def sync(cfg, reason, me=None):
     """Uploads every slice that is new or changed. Returns a result dict; raises ServerError on refusal."""
-    me = check_code(cfg)
+    me = me or check_code(cfg)
     if me.get("expires_at") != cfg.get("expires_at"):
         cfg["expires_at"] = me.get("expires_at")
         save_config(cfg)
@@ -493,7 +510,7 @@ def sync(cfg, reason):
     files = state.setdefault("files", {})
     sent = state.setdefault("slices", {})
     result = {"started_at": now_utc().isoformat(), "reason": reason, "sessions": 0, "slices": 0,
-              "bytes": 0, "skipped_automated": 0, "errors": []}
+              "bytes": 0, "skipped_automated": 0, "errors": [], "client_version": VERSION}
     entries = sources.find_session_files()
     try:
         sync_files(cfg, entries, files, sent, state, result)
@@ -564,6 +581,104 @@ def sync_files(cfg, entries, files, sent, state, result):
             log("progress %d/%d files, %d slices" % (i + 1, len(entries), result["slices"]))
 
 
+# ---------- Updates ----------
+
+def version_tuple(text):
+    try:
+        return tuple(int(x) for x in str(text).split("."))
+    except ValueError:
+        return ()
+
+
+def running_from_app():
+    """Only the installed copy updates itself, never a clone or the installer's temporary folder."""
+    return os.path.abspath(os.path.dirname(os.path.abspath(__file__))) == os.path.abspath(path("app"))
+
+
+def fetch_update_file(ref, rel):
+    url = (env("UPDATE_BASE") or UPDATE_BASE) + ref + "/" + rel
+    req = urllib.request.Request(url, headers={"User-Agent": "session-relay/" + VERSION})
+    ctx = ssl_context() if url.startswith("https") else None
+    with urllib.request.urlopen(req, timeout=TIMEOUT, context=ctx) as res:
+        data = res.read(MAX_UPDATE_FILE + 1)
+    if len(data) > MAX_UPDATE_FILE:
+        raise ValueError("%s is too large" % rel)
+    return data
+
+
+def maybe_update(me, reason):
+    """Installs the client the server names when it is newer. Returns the new version, or None.
+    Any failure keeps the current version: syncing never stops because of an update."""
+    info = me.get("client") or {}
+    target, ref, files = info.get("version"), info.get("ref"), info.get("files")
+    if reason not in ("daily", "manual") or not (target and ref and isinstance(files, dict)):
+        return None
+    if version_tuple(target) <= version_tuple(VERSION) or not running_from_app() or env("NO_UPDATE"):
+        return None
+    if env("JUST_UPDATED"):
+        return None  # Never twice in one run, even if the new code reports an older version.
+    state = load_state()
+    failed = state.get("update_failed") or {}
+    if failed.get("version") == target and failed.get("date") == today():
+        return None
+    stage = path("app.new")
+    try:
+        if not UPDATE_REF.match(str(ref)):
+            raise ValueError("bad ref %r" % ref)
+        shutil.rmtree(stage, ignore_errors=True)
+        for rel, digest in sorted(files.items()):
+            if not UPDATE_FILE.match(rel):
+                raise ValueError("unexpected file %r" % rel)
+            data = fetch_update_file(ref, rel)
+            if hashlib.sha256(data).hexdigest() != digest:
+                raise ValueError("%s does not match the server's hash" % rel)
+            dest = os.path.join(stage, rel if rel.startswith("skill/") else os.path.basename(rel))
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(data)
+        for name in ("relay.py", "sources.py"):
+            if not os.path.exists(os.path.join(stage, name)):
+                raise ValueError("%s missing from the update" % name)
+        check = subprocess.run([sys.executable, os.path.join(stage, "relay.py"), "version"], capture_output=True,
+                               text=True, timeout=120, env=dict(os.environ, SESSION_RELAY_NO_UPDATE="1"))
+        if check.returncode != 0 or check.stdout.strip() != target:
+            raise ValueError("the new client did not start: %s" % (check.stderr.strip()[-300:] or check.stdout.strip()))
+        previous = path("app.prev")
+        shutil.rmtree(previous, ignore_errors=True)
+        os.rename(path("app"), previous)
+        os.rename(stage, path("app"))
+    except Exception as e:  # noqa: BLE001 — whatever went wrong, keep the version that works.
+        shutil.rmtree(stage, ignore_errors=True)
+        state["update_failed"] = {"version": target, "date": today(), "error": str(e)[:300]}
+        save_state(state)
+        log("update to %s failed: %s" % (target, e))
+        say(t("update_failed", version=target, e=e))
+        return None
+    state.pop("update_failed", None)
+    state["update"] = {"at": now_utc().isoformat(), "from": VERSION, "to": target, "ref": ref}
+    save_state(state)
+    log("updated %s -> %s (%s)" % (VERSION, target, ref[:12]))
+    say(t("updated", old=VERSION, new=target))
+    return target
+
+
+def relaunch(reason, version):
+    """Runs the same command again with the new code, which then syncs."""
+    command = "sync" if reason == "manual" else "tick"
+    script = path("app", "relay.py")
+    os.environ["SESSION_RELAY_JUST_UPDATED"] = version
+    sys.stdout.flush()
+    os.execv(sys.executable, [sys.executable, script, command])
+
+
+def after_update():
+    """First run of a new version: refresh the command, the local README and the installed skill."""
+    copy_app()
+    for target in skill_targets():
+        if os.path.exists(os.path.join(target, "SKILL.md")) and skill_source():
+            shutil.copy2(skill_source(), os.path.join(target, "SKILL.md"))
+
+
 def run_sync(reason):
     cfg = load_config()
     if not cfg.get("code"):
@@ -576,12 +691,17 @@ def run_sync(reason):
     if locally_expired(cfg):
         stop("expired", t("ended_at", end=cfg.get("expires_at")))
         return 3
+    updated = None
     with lock() as got:
         if not got:
             say(t("busy"))
             return 0
         try:
-            result = sync(cfg, reason)
+            # 1. Is the code still valid?  2. Is there a newer client?  3. Sync.  4. Record (in sync).
+            me = check_code(cfg)
+            updated = maybe_update(me, reason)
+            if not updated:
+                result = sync(cfg, reason, me)
         except ServerError as e:
             why = ended_reason(e)
             if why:
@@ -594,6 +714,8 @@ def run_sync(reason):
             log("network error: %s" % e)
             say(t("net_retry", e=e))
             return 1
+    if updated:
+        relaunch(reason, updated)  # Continues with the new code; does not return.
     msg = t("synced", slices=result["slices"], sessions=result["sessions"], mb=result["bytes"] / 1e6)
     if result["errors"]:
         msg += t("sync_errors", n=len(result["errors"]))
@@ -761,7 +883,13 @@ def main(argv=None):
     p.add_argument("--json", action="store_true")
     sub.add_parser("stop")
     sub.add_parser("uninstall")
+    sub.add_parser("version")
     args = parser.parse_args(argv)
+    if args.cmd == "version":
+        print(VERSION)
+        return 0
+    if env("JUST_UPDATED") and running_from_app():
+        after_update()
     commands = {"init": cmd_init, "tick": cmd_tick, "sync": cmd_sync, "status": cmd_status, "stop": cmd_stop,
                 "uninstall": cmd_uninstall}
     return commands[args.cmd](args)

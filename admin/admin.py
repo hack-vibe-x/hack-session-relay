@@ -138,6 +138,8 @@ class Handler(BaseHTTPRequestHandler):
                         codes[user["id"]].update({"expires_at": user["expires_at"], "memo": user.get("memo")})
                         save_codes(codes)
                 return self.send_json(200, res)
+            if route == "/client" and method == "GET":
+                return self.send_json(200, upstream("GET", "/client"))
             if route.startswith("/users/") and method == "GET":
                 return self.send_json(200, upstream("GET", route))
             return self.send_json(404, {"error": "not found"})
