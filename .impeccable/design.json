@@ -1,0 +1,515 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-17T00:00:00Z",
+  "title": "Design System: Session Relay 관리",
+  "extensions": {
+    "colorMeta": {
+      "ground": {
+        "role": "neutral",
+        "displayName": "회녹 바탕 Grey-Green Ground",
+        "dark": "#131916",
+        "canonical": "oklch(95.7% 0.007 146)",
+        "tonalRamp": [
+          "#0a0c0a",
+          "#242624",
+          "#404340",
+          "#5f625f",
+          "#808380",
+          "#a3a6a3",
+          "#c7cac7",
+          "#edefed"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "장부 흰색 Ledger White",
+        "dark": "#1a211d",
+        "canonical": "oklch(100.0% 0.000 90)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "ink": {
+        "role": "primary",
+        "displayName": "청흑 잉크 Blue-Black Ink",
+        "dark": "#e2e9e4",
+        "canonical": "oklch(28.0% 0.035 252)",
+        "tonalRamp": [
+          "#060c13",
+          "#1d2631",
+          "#374351",
+          "#546374",
+          "#748496",
+          "#99a7b7",
+          "#becbd9",
+          "#e5f0fc"
+        ]
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "보조 잉크 Second Ink",
+        "dark": "#b1bdb5",
+        "canonical": "oklch(44.6% 0.022 160)",
+        "tonalRamp": [
+          "#070d09",
+          "#1f2723",
+          "#3a453f",
+          "#58655d",
+          "#78867e",
+          "#9ca9a1",
+          "#c1ccc6",
+          "#e8f1ec"
+        ]
+      },
+      "pencil": {
+        "role": "neutral",
+        "displayName": "연필 Pencil Grey",
+        "dark": "#93a198",
+        "canonical": "oklch(51.0% 0.022 152)",
+        "tonalRamp": [
+          "#070d09",
+          "#202721",
+          "#3b453d",
+          "#59655c",
+          "#79867c",
+          "#9da8a0",
+          "#c2ccc4",
+          "#e9f1ea"
+        ]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "괘선 Rule",
+        "dark": "#34403a",
+        "canonical": "oklch(85.5% 0.015 149)",
+        "tonalRamp": [
+          "#090c09",
+          "#222622",
+          "#3e443f",
+          "#5c635d",
+          "#7d857e",
+          "#a0a7a1",
+          "#c5cbc6",
+          "#ebf0eb"
+        ]
+      },
+      "rule-soft": {
+        "role": "neutral",
+        "displayName": "옅은 괘선 Soft Rule",
+        "dark": "#28312c",
+        "canonical": "oklch(92.2% 0.009 151)",
+        "tonalRamp": [
+          "#0a0c0a",
+          "#232623",
+          "#3f4340",
+          "#5e635f",
+          "#7f8480",
+          "#a2a6a3",
+          "#c6cac7",
+          "#ecefed"
+        ]
+      },
+      "weekend": {
+        "role": "neutral",
+        "displayName": "주말 음영 Weekend Shade",
+        "dark": "#171e1a",
+        "canonical": "oklch(97.6% 0.005 146)",
+        "tonalRamp": [
+          "#0a0b0a",
+          "#242524",
+          "#414341",
+          "#606260",
+          "#818381",
+          "#a3a6a3",
+          "#c8cac8",
+          "#edefed"
+        ]
+      },
+      "sel": {
+        "role": "neutral",
+        "displayName": "선택 Selection",
+        "dark": "#21342a",
+        "canonical": "oklch(93.7% 0.017 159)",
+        "tonalRamp": [
+          "#080c0a",
+          "#202723",
+          "#3c443f",
+          "#5a645e",
+          "#7a857f",
+          "#9ea8a2",
+          "#c3ccc6",
+          "#e9f1ec"
+        ]
+      },
+      "sel-rule": {
+        "role": "neutral",
+        "displayName": "선택 괘선 Selection Rule",
+        "dark": "#557a64",
+        "canonical": "oklch(72.3% 0.038 157)",
+        "tonalRamp": [
+          "#040e08",
+          "#1a2920",
+          "#35473b",
+          "#516859",
+          "#72897a",
+          "#96ab9d",
+          "#bccfc2",
+          "#e4f3e9"
+        ]
+      },
+      "red": {
+        "role": "secondary",
+        "displayName": "출석부 빨강 Register Red",
+        "dark": "#ec7268",
+        "canonical": "oklch(55.1% 0.188 28)",
+        "tonalRamp": [
+          "#2a0000",
+          "#530000",
+          "#800307",
+          "#af241f",
+          "#d74d42",
+          "#f67b6e",
+          "#ffa79a",
+          "#ffd4c7"
+        ]
+      },
+      "red-soft": {
+        "role": "secondary",
+        "displayName": "붉은 기 Red Wash",
+        "dark": "#3a2421",
+        "canonical": "oklch(96.2% 0.014 28)",
+        "tonalRamp": [
+          "#0e0a09",
+          "#2a2322",
+          "#48403e",
+          "#695e5d",
+          "#8a7f7e",
+          "#aca2a1",
+          "#cfc7c5",
+          "#f4edeb"
+        ]
+      },
+      "sat": {
+        "role": "tertiary",
+        "displayName": "토요일 파랑 Saturday Blue",
+        "dark": "#8fb0d6",
+        "canonical": "oklch(50.0% 0.081 251)",
+        "tonalRamp": [
+          "#000b1d",
+          "#0e263f",
+          "#264464",
+          "#40648b",
+          "#6086af",
+          "#87a8ce",
+          "#afcced",
+          "#d9f1ff"
+        ]
+      },
+      "a1": {
+        "role": "scale",
+        "displayName": "새싹 Sprout (1-2)",
+        "dark": "#23443a",
+        "canonical": "oklch(89.5% 0.026 158)",
+        "tonalRamp": [
+          "#060d09",
+          "#1e2822",
+          "#39463e",
+          "#56665c",
+          "#77877d",
+          "#9ba9a0",
+          "#c0cdc5",
+          "#e7f2eb"
+        ]
+      },
+      "a2": {
+        "role": "scale",
+        "displayName": "잎 Leaf (3-5)",
+        "dark": "#2f6b52",
+        "canonical": "oklch(75.4% 0.063 159)",
+        "tonalRamp": [
+          "#001006",
+          "#102b1d",
+          "#284a38",
+          "#426c55",
+          "#638e76",
+          "#8aaf9a",
+          "#b2d2bf",
+          "#dbf6e6"
+        ]
+      },
+      "a3": {
+        "role": "scale",
+        "displayName": "숲 Grove (6-9)",
+        "dark": "#4f9c78",
+        "canonical": "oklch(52.6% 0.086 162)",
+        "tonalRamp": [
+          "#001105",
+          "#002e1b",
+          "#104e35",
+          "#2a7052",
+          "#4e9372",
+          "#79b497",
+          "#a5d7bc",
+          "#d1fae4"
+        ]
+      },
+      "a4": {
+        "role": "scale",
+        "displayName": "깊은 숲 Deep Forest (10+)",
+        "dark": "#93d5ae",
+        "canonical": "oklch(36.4% 0.058 171)",
+        "tonalRamp": [
+          "#000f09",
+          "#0d2b22",
+          "#264a3f",
+          "#406b5d",
+          "#618d7e",
+          "#88afa1",
+          "#b0d2c6",
+          "#daf6eb"
+        ]
+      },
+      "on-ink": {
+        "role": "neutral",
+        "displayName": "잉크 위 글자 On Ink",
+        "dark": "#131916",
+        "canonical": "#ffffff"
+      },
+      "scrim": {
+        "role": "neutral",
+        "displayName": "막 Scrim",
+        "dark": "rgba(0, 0, 0, .55)"
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "상세 패널의 참가자 이름."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "상단 바 제품명, 대화상자 제목."
+      },
+      "figure": {
+        "displayName": "Figure",
+        "purpose": "집계 줄의 개수."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "표, 사실 목록, 세션 목록, 13px 굵은 섹션 제목."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "표 머리, 작은 버튼, 분할 버튼."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "요일, 범례, 태그, 달력 날짜."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "코드, 전화번호, 버전, 경로."
+      }
+    },
+    "shadows": [
+      {
+        "name": "today-rule",
+        "value": "inset 0 -3px 0 var(--ink)",
+        "purpose": "오늘 열 머리와 오늘 달력 칸의 밑줄. 그림자가 아니라 선."
+      },
+      {
+        "name": "open-row-rule",
+        "value": "inset 0 1px 0 var(--ink)",
+        "purpose": "열린 행의 윗줄."
+      },
+      {
+        "name": "focus-bleed",
+        "value": "-8px 0 0 var(--sel), 8px 0 0 var(--sel)",
+        "purpose": "포커스된 세션 항목의 선택 바탕을 좌우로 넓힘."
+      }
+    ],
+    "motion": [
+      {
+        "name": "panel-enter",
+        "value": ".22s cubic-bezier(.16, 1, .3, 1)",
+        "purpose": "상세 패널이 24px 오른쪽에서 밀려 들어옴. prefers-reduced-motion에서는 없음."
+      },
+      {
+        "name": "toast-fade",
+        "value": "opacity .2s",
+        "purpose": "토스트 표시/숨김."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "panel-narrow",
+        "value": "1100px"
+      },
+      {
+        "name": "stack",
+        "value": "760px"
+      },
+      {
+        "name": "register-c-end",
+        "value": "940px (container)"
+      },
+      {
+        "name": "register-c-ver",
+        "value": "820px (container)"
+      },
+      {
+        "name": "register-7day",
+        "value": "700px (container)"
+      },
+      {
+        "name": "register-compact",
+        "value": "520px (container)"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "기본 동작 버튼. 흰 바탕, 괘선 테두리, hover 시 테두리만 진해진다.",
+      "html": "<button class=\"ds-btn\">새로고침</button>",
+      "css": ".ds-btn{height:32px;padding:0 13px;border:1px solid var(--rule);border-radius:3px;background:var(--surface);color:var(--ink);font:500 13px/1.45 var(--sans);cursor:pointer;white-space:nowrap}.ds-btn:hover{border-color:var(--ink-2)}.ds-btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "화면당 하나의 주 동작. 잉크 바탕.",
+      "html": "<button class=\"ds-btn-primary\">새 코드 발행</button>",
+      "css": ".ds-btn-primary{height:32px;padding:0 13px;border:1px solid var(--ink);border-radius:3px;background:var(--ink);color:var(--on-ink);font:500 13px/1.45 var(--sans);cursor:pointer}.ds-btn-primary:hover{opacity:.88}.ds-btn-primary:focus-visible{outline:2px solid var(--ink);outline-offset:2px}"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "되돌릴 수 없는 동작(지금 종료)에만.",
+      "html": "<button class=\"ds-btn-danger\">지금 종료</button>",
+      "css": ".ds-btn-danger{height:26px;padding:0 9px;border:1px solid var(--red);border-radius:3px;background:var(--surface);color:var(--red);font:500 12px/1.45 var(--sans);cursor:pointer}.ds-btn-danger:focus-visible{outline:2px solid var(--ink);outline-offset:2px}"
+    },
+    {
+      "name": "Search Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "32px 괘선 입력칸.",
+      "html": "<input class=\"ds-input\" type=\"search\" placeholder=\"전화번호 또는 메모 검색\">",
+      "css": ".ds-input{height:32px;width:240px;padding:0 10px;border:1px solid var(--rule);border-radius:3px;background:var(--surface);color:var(--ink);font:13px/1.45 var(--sans)}.ds-input::placeholder{color:var(--pencil)}.ds-input:focus-visible{outline:2px solid var(--ink);outline-offset:2px}"
+    },
+    {
+      "name": "Tally Filter",
+      "kind": "nav",
+      "refersTo": "tally-filter-on",
+      "description": "개수가 곧 필터. 눌린 항목은 흰 바탕과 잉크 테두리, 경고 항목은 빨강.",
+      "html": "<div class=\"ds-tally\"><button class=\"ds-f\" aria-pressed=\"true\"><b>8</b>전체</button><button class=\"ds-f\"><b>4</b>오늘 동기화</button><button class=\"ds-f ds-alert\"><b>1</b>2일 넘게 소식 없음</button></div>",
+      "css": ".ds-tally{display:flex;gap:4px;font:13px/1.45 var(--sans);font-variant-numeric:tabular-nums}.ds-f{height:30px;padding:0 9px;border:1px solid transparent;border-radius:3px;background:none;color:var(--ink-2);font:inherit;cursor:pointer}.ds-f b{font-size:18px;font-weight:700;color:var(--ink);margin-right:4px;vertical-align:-1px}.ds-f:hover{border-color:var(--rule)}.ds-f[aria-pressed=true]{background:var(--surface);border-color:var(--ink);color:var(--ink)}.ds-alert,.ds-alert b{color:var(--red)}.ds-f:focus-visible{outline:2px solid var(--ink);outline-offset:2px}"
+    },
+    {
+      "name": "Tags",
+      "kind": "chip",
+      "refersTo": "tag",
+      "description": "짧은 상태 태그와 도구 표시.",
+      "html": "<span class=\"ds-tag\">사용 중</span> <span class=\"ds-tag ds-warn\">최신 대기</span> <span class=\"ds-tool ds-claude\">Claude</span> <span class=\"ds-tool ds-codex\">Codex</span>",
+      "css": ".ds-tag,.ds-tool{display:inline-block;padding:0 5px;border:1px solid var(--rule);border-radius:2px;font:11px/17px var(--sans);color:var(--ink-2);white-space:nowrap}.ds-warn{border-color:var(--red);color:var(--red)}.ds-tool{font-weight:600;border-color:currentColor}.ds-claude{color:var(--a4)}.ds-codex{color:var(--sat)}"
+    },
+    {
+      "name": "Segmented Control",
+      "kind": "nav",
+      "refersTo": "segmented-on",
+      "description": "달력/목록 전환.",
+      "html": "<span class=\"ds-seg\"><button aria-pressed=\"true\">달력</button><button aria-pressed=\"false\">목록</button></span>",
+      "css": ".ds-seg{display:inline-flex;border:1px solid var(--rule);border-radius:3px;overflow:hidden}.ds-seg button{height:26px;padding:0 10px;border:0;background:var(--surface);color:var(--ink);font:500 12px/1 var(--sans);cursor:pointer}.ds-seg button+button{border-left:1px solid var(--rule)}.ds-seg button[aria-pressed=true]{background:var(--ink);color:var(--on-ink)}.ds-seg button:focus-visible{outline:2px solid var(--ink);outline-offset:-2px}"
+    },
+    {
+      "name": "Register Row with Day Marks",
+      "kind": "custom",
+      "refersTo": "register-sheet",
+      "description": "출석부 한 줄: 참가자, 날짜 칸(a1-a4, 보고 없음, 종료 도장), 합계.",
+      "html": "<table class=\"ds-reg\"><thead><tr><th>참가자</th><th class=\"d\">12<small>금</small></th><th class=\"d we sa\">13<small>토</small></th><th class=\"d we su\">14<small>일</small></th><th class=\"d today\">15<small>월</small></th><th class=\"num\">세션</th></tr></thead><tbody><tr><td><b>B팀 박준호</b><span>010-7720-1185</span></td><td class=\"d\"><i class=\"m a3\"></i></td><td class=\"d we\"><i class=\"m a1\"></i></td><td class=\"d we\"><i class=\"m q\"></i></td><td class=\"d now\"><i class=\"stamp\">종료</i></td><td class=\"num\">27</td></tr></tbody></table>",
+      "css": ".ds-reg{border-collapse:collapse;background:var(--surface);border:1px solid var(--rule);color:var(--ink);font:13px/1.45 var(--sans);font-variant-numeric:tabular-nums}.ds-reg th{height:46px;padding:0 8px;text-align:left;font-size:12px;font-weight:600;border-bottom:1px solid var(--ink)}.ds-reg th.d{width:32px;padding:0;text-align:center;font-weight:500;line-height:1.2;border-left:1px solid var(--rule-soft)}.ds-reg th.d small{display:block;font-size:11px;color:var(--pencil)}.ds-reg th.su,.ds-reg th.su small{color:var(--red)}.ds-reg th.sa,.ds-reg th.sa small{color:var(--sat)}.ds-reg th.today{box-shadow:inset 0 -3px 0 var(--ink);font-weight:700}.ds-reg td{height:44px;padding:0 8px;border-bottom:1px solid var(--rule-soft)}.ds-reg td b{display:block;font-weight:600}.ds-reg td span{font:11px var(--mono);color:var(--pencil)}.ds-reg td.d{padding:0;text-align:center;border-left:1px solid var(--rule-soft)}.ds-reg .we{background:var(--weekend)}.ds-reg td.now{background:var(--sel)}.ds-reg .num{text-align:right}.ds-reg tbody tr:hover td{background:var(--weekend)}.ds-reg i.m{display:inline-block;width:18px;height:18px;border:1px solid var(--rule-soft);border-radius:2px;vertical-align:middle}.ds-reg i.a1{background:var(--a1);border-color:var(--a1)}.ds-reg i.a3{background:var(--a3);border-color:var(--a3)}.ds-reg i.q{border:1px dashed var(--red);background:var(--red-soft)}.ds-reg i.stamp{display:inline-block;padding:0 2px;border:1.5px solid var(--red);border-radius:2px;color:var(--red);font:700 11px/15px var(--sans);font-style:normal;transform:rotate(-8deg)}"
+    },
+    {
+      "name": "Facts List",
+      "kind": "card",
+      "refersTo": "register-sheet",
+      "description": "상세 패널의 항목명/값 격자.",
+      "html": "<dl class=\"ds-facts\"><dt>마지막 동기화</dt><dd><span class=\"ds-ok\"></span>2026-11-13 09:12 <span class=\"ds-red\">· 4일째 소식 없음</span></dd><dt>버전</dt><dd><span class=\"ds-mono\">0.6.2</span> 최신</dd></dl>",
+      "css": ".ds-facts{display:grid;grid-template-columns:92px minmax(0,1fr);margin:0;border-top:1px solid var(--rule);font:13px/1.45 var(--sans);color:var(--ink);background:var(--surface)}.ds-facts dt,.ds-facts dd{margin:0;padding:9px 0;border-bottom:1px solid var(--rule-soft)}.ds-facts dt{color:var(--pencil);font-size:12px;padding-top:11px}.ds-ok{display:inline-block;width:7px;height:7px;border-radius:1px;background:var(--red);margin-right:6px;vertical-align:1px}.ds-red{color:var(--red)}.ds-mono{font:12px var(--mono)}"
+    },
+    {
+      "name": "Dialog",
+      "kind": "card",
+      "refersTo": "dialog",
+      "description": "그림자 없는 대화상자. 제목 아래 잉크 괘선.",
+      "html": "<div class=\"ds-dialog\"><h2>종료일 변경</h2><label>새 종료일<input type=\"date\"></label><div class=\"ds-actions\"><button class=\"ds-b\">취소</button><button class=\"ds-b ds-p\">저장</button></div></div>",
+      "css": ".ds-dialog{width:420px;display:grid;gap:14px;padding:20px 22px;border:1px solid var(--rule);border-radius:4px;background:var(--surface);color:var(--ink);font:13px/1.45 var(--sans)}.ds-dialog h2{margin:0 0 2px;padding-bottom:12px;border-bottom:1px solid var(--ink);font-size:16px}.ds-dialog label{display:grid;gap:5px;font-size:12px;color:var(--ink-2)}.ds-dialog input{height:32px;padding:0 10px;border:1px solid var(--rule);border-radius:3px;background:var(--surface);color:var(--ink);font:inherit}.ds-actions{display:flex;justify-content:flex-end;gap:8px}.ds-b{height:32px;padding:0 13px;border:1px solid var(--rule);border-radius:3px;background:var(--surface);color:var(--ink);font:500 13px var(--sans)}.ds-p{background:var(--ink);border-color:var(--ink);color:var(--on-ink)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "출석부 (The Class Register)",
+    "overview": "관리 화면은 학급 출석부다. 참가자 한 명이 한 줄이고, 그 줄이 날짜 칸으로 이어진다. 빠진 날은 해석해야 하는 상태 단어가 아니라 곧은 줄 위의 빈 칸으로 보인다. 회녹색 바탕 위에 흰 장부가 놓이고, 청흑색 잉크로 쓰고, 가는 회녹색 괘선으로 나눈다. 연필 회색은 보조 기록, 4단계 초록은 하루 세션 수, 출석부의 붉은 펜은 결석과 종료에만 쓴다. \"사이드바 목록 + 상세 카드\"라는 흔한 관리자 배치를 따르지 않는다.\n\n밀도는 높고 차분하다. 기본 글자 13px, 행 높이 44px, 숫자는 모두 고정폭 숫자(tabular-nums)로 정렬된다. 깊이는 그림자가 아니라 괘선의 굵기와 바탕의 단계로 만든다. 장식은 없고, 이 세계 고유의 장치는 날짜 칸, 기울어진 붉은 종료 도장, 일요일 빨강과 토요일 파랑의 요일 표기 셋뿐이다. 다크 모드는 같은 장부를 밤에 펼친 것으로, 같은 역할 토큰을 어두운 값으로 바꿀 뿐 구조는 그대로다.\n\n다음 기능인 세션 대화 분석과 보고서는 이 페이지에서 가장 많이 쓰일 부분이 된다. 보고서는 새 세계를 만들지 않는다. 같은 장부 위에 읽기용 단을 하나 더 펼치는 것으로 확장한다(아래 Layout과 Components의 \"보고서 읽기\" 지침 참고, 아직 구현되지 않은 향후 지침).",
+    "keyCharacteristics": [
+      "한 사람 한 줄, 하루 한 칸. 빈 칸 자체가 정보다.",
+      "흰 장부(surface)가 회녹색 바탕(ground) 위에 1px 괘선으로 놓인다. 그림자 없음.",
+      "붉은색은 결석·종료·경고에만. 단 일요일 빨강은 달력 관례로 예외.",
+      "고딕 한 벌과 모노 한 벌. 모노는 코드, 전화번호, 버전, 경로에만.",
+      "정확한 숫자를 그대로 보여준다. 반올림한 상태 단어로 바꾸지 않는다."
+    ],
+    "rules": [
+      {
+        "name": "The Red Pen Rule",
+        "body": "빨강은 결석, 종료, 경고, 파괴적 동작에만 쓴다. 상태가 \"괜찮음\"인 것에는 절대 쓰지 않는다. 일요일 표기는 한국 달력의 관례이므로 이 규칙의 예외다.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Scale Rule",
+        "body": "양은 `a1`–`a4` 한 줄의 초록 농도로만 말한다. 구간(1–2 / 3–5 / 6–9 / 10+)은 화면마다 바꾸지 않는다.",
+        "section": "colors"
+      },
+      {
+        "name": "The Machine Text Rule",
+        "body": "사람이 쓴 말은 고딕, 기계가 만든 문자열은 모노. 섞지 않는다.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Rule",
+        "body": "모든 숫자는 `font-variant-numeric: tabular-nums`로 자릿수가 세로로 맞는다. 수치 열은 오른쪽 정렬.",
+        "section": "typography"
+      },
+      {
+        "name": "The Ruled Paper Rule",
+        "body": "깊이는 선으로 긋는다. 흐린 그림자, 띄운 카드, 유리 효과를 쓰지 않는다. `box-shadow`가 필요하면 inset 선이거나 바탕 확장이어야 한다.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** 하루를 한 칸으로 보여주고, 빠진 날을 빈 칸이나 빨강 점선 칸으로 남긴다.",
+      "**Do** 양은 `a1`–`a4` 한 단계 척도(1–2 / 3–5 / 6–9 / 10+)로만 표시한다.",
+      "**Do** 깊이를 괘선 굵기와 바탕 단계로 만든다: 행 사이 `rule-soft`, 표 머리 아래 `ink` 1px, 오늘 표시 `ink` 3px inset.",
+      "**Do** 코드, 전화번호, 버전, 경로는 모노, 그 밖의 모든 글은 고딕으로 쓴다.",
+      "**Do** 숫자를 정확히 쓰고 tabular-nums로 정렬하며, 수치 열은 오른쪽 정렬한다.",
+      "**Do** 일요일은 빨강, 토요일은 `sat` 파랑으로 표기하고 주말 열에 `weekend` 음영을 깐다.",
+      "**Do** 새 색을 쓰기 전에 다크 모드 값까지 같은 이름의 토큰으로 정의한다."
+    ],
+    "donts": [
+      "**Don't** 빨강을 결석, 종료, 경고, 파괴적 동작, 일요일 표기 밖에서 쓰지 않는다.",
+      "**Don't** 콘텐츠에 흐린 그림자나 띄운 카드를 쓰지 않는다. `box-shadow`는 inset 선과 바탕 확장에만.",
+      "**Don't** 4px보다 둥근 모서리, 알약 모양, 원형 배지를 쓰지 않는다.",
+      "**Don't** 종료 도장의 기울어진 모양을 종료 외의 상태에 빌려 쓰지 않는다.",
+      "**Don't** 빠진 날을 \"비활성\", \"주의\" 같은 상태 단어로 바꿔 숨기지 않는다.",
+      "**Don't** 사이드바 목록 + 상세 카드 배치로 되돌아가지 않는다. 목록은 출석부다.",
+      "**Don't** 런타임에 외부 글꼴이나 아이콘 자산을 불러오지 않는다. 아이콘은 인라인 SVG."
+    ]
+  }
+}

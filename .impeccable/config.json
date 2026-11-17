@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-color",
+        "value": "rgb(19, 25, 22)",
+        "createdAt": "2026-11-17T13:56:19.027Z",
+        "reason": "Claude: dark-mode value of a documented token (ground/ink-2/rule-soft dark field in .impeccable/design.json)"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "rgb(177, 189, 181)",
+        "createdAt": "2026-11-17T13:56:19.051Z",
+        "reason": "Claude: dark-mode value of a documented token (ground/ink-2/rule-soft dark field in .impeccable/design.json)"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "rgb(40, 49, 44)",
+        "createdAt": "2026-11-17T13:56:19.076Z",
+        "reason": "Claude: dark-mode value of a documented token (ground/ink-2/rule-soft dark field in .impeccable/design.json)"
+      }
+    ]
+  }
+}
