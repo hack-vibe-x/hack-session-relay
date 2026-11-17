@@ -424,6 +424,30 @@ class E2E(unittest.TestCase):
             proc.terminate()
             proc.wait()
 
+    def test_batch_upload(self):
+        uid, code = self.issue(phone="010-7777-0000")
+        good = gzip.compress(b'{"type":"user"}\n')
+        manifest = {"slices": [
+            {"date": "2026-11-10", "tool": "claude", "session_id": "abc", "size": len(good),
+             "meta": {"lines": 1, "cwd": "/w", "media_stripped": 1}},
+            {"date": "2026-11-10", "tool": "nope", "session_id": "abc", "size": len(good), "meta": {}},
+            {"date": "2026-11-11", "tool": "codex", "session_id": "def", "size": 3, "meta": {}}],
+            "report": {"reason": "test", "slices": 1, "client_version": "0.7.0"}}
+        body = b"SRB1\n" + json.dumps(manifest).encode() + b"\n" + good + good + b"xyz"
+        req = urllib.request.Request(self.url + "/v1/batch", data=body, method="POST")
+        req.add_header("Authorization", "Bearer " + code)
+        with urllib.request.urlopen(req, timeout=10) as res:
+            results = json.loads(res.read())["results"]
+        self.assertEqual([r["ok"] for r in results], [True, False, False])  # Bad path, not gzip: the rest stays.
+        self.assertEqual(call(self.url + "/admin/users/%s/days" % uid)["days"][0]["date"], "2026-11-10")
+        user = call(self.url + "/admin/users/" + uid)["user"]
+        self.assertEqual((user["last_sync"]["reason"], user["client_version"]), ("test", "0.7.0"))
+        req = urllib.request.Request(self.url + "/v1/batch", data=body[:-1], method="POST")  # Sizes do not add up.
+        req.add_header("Authorization", "Bearer " + code)
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(req, timeout=10)
+        self.assertEqual(e.exception.code, 400)
+
     def test_admin_requires_key(self):
         with self.assertRaises(urllib.error.HTTPError) as e:
             call(self.url + "/admin/users", key="wrong")

@@ -11,7 +11,11 @@ Storage (DATA_DIR, the Railway volume):
 Client API (Authorization: Bearer <code>):
   GET  /v1/me                                 is the code valid; its end time
   PUT  /v1/sessions/<date>/<tool>/<session>   upload one day of one session (gzip body); replaces the earlier copy
+  POST /v1/batch                              many such slices in one request (format below), optionally with the
+                                              sync report; answers one result per slice, in order
   POST /v1/sync                               report of a finished sync
+  A batch body: b"SRB1\n", one line of JSON {"slices": [{"date", "tool", "session_id", "size", "meta"}, ...],
+  "report": {...} or absent}, then the slices' gzip bodies back to back, each "size" bytes long.
   An ended code gets 403 {"status": "expired"}; an unknown code 401 {"status": "invalid"}.
 
 Admin API (Authorization: Bearer <ADMIN_KEY>):
@@ -309,7 +313,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if method == "PUT" and len(parts) == 4 and parts[0] == "sessions":
             _, day, tool, sid = parts
-            if not DATE.match(day) or tool not in TOOLS or not SESSION.match(sid):
+            if not slice_path_ok(day, tool, sid):
                 self.close_connection = True
                 raise ValueError("bad path")
             try:
@@ -317,41 +321,47 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 self.close_connection = True
                 return self.send_json(413, {"error": "upload too large"})
-            if body[:2] != b"\x1f\x8b":
-                raise ValueError("body must be gzip")
             try:
                 meta = json.loads(self.headers.get("X-Relay-Meta") or "{}")
             except ValueError:
                 meta = {}
-            meta = {k: meta.get(k) for k in ("cwd", "lines", "first", "last", "sha256", "bytes", "media_removed",
-                                             "media_stripped", "secrets_redacted", "redacted")}
-            if meta.get("media_stripped") != media.VERSION:
-                # An older client: replace images here.
-                try:
-                    body, raw_bytes, removed = strip_gz(body)
-                except (OSError, EOFError, ValueError):
-                    raise ValueError("body is not valid gzip")
-                meta.update({"bytes": raw_bytes, "media_removed": removed, "media_stripped": media.VERSION})
-            folder = os.path.join(user_dir(uid), day)
-            meta.update({"tool": tool, "session_id": sid, "uploaded_at": iso(now()), "gz_bytes": len(body)})
-            data_path = os.path.join(folder, "%s_%s.jsonl.gz" % (tool, sid))
-            with _files_lock:
-                write_atomic(data_path, body)
-                write_atomic(os.path.join(folder, "%s_%s.meta.json" % (tool, sid)), json.dumps(meta).encode())
-                INDEX.put(uid, day, tool, sid, meta, len(body), os.stat(data_path).st_mtime)
-            bump()
+            store_slice(uid, day, tool, sid, body, meta)
             return self.send_json(200, {"ok": True})
 
+        if method == "POST" and parts == ["batch"]:
+            try:
+                body = self.read_body(MAX_UPLOAD)
+            except ValueError:
+                self.close_connection = True
+                return self.send_json(413, {"error": "upload too large"})
+            head, _, rest = body.partition(b"\n")
+            line, _, rest = rest.partition(b"\n")
+            if head != b"SRB1":
+                raise ValueError("not a batch")
+            manifest = json.loads(line)
+            items = manifest.get("slices") if isinstance(manifest, dict) else None
+            if not isinstance(items, list):
+                raise ValueError("batch has no slices list")
+            sizes = [item.get("size") if isinstance(item, dict) else None for item in items]
+            if not all(isinstance(n, int) and n >= 0 for n in sizes) or sum(sizes) != len(rest):
+                raise ValueError("batch sizes do not match its body")
+            results, offset = [], 0
+            for item, size in zip(items, sizes):
+                piece, offset = rest[offset:offset + size], offset + size
+                day, tool, sid = str(item.get("date")), str(item.get("tool")), str(item.get("session_id"))
+                try:
+                    if not slice_path_ok(day, tool, sid):
+                        raise ValueError("bad path")
+                    store_slice(uid, day, tool, sid, piece, item.get("meta") or {})
+                    results.append({"ok": True})
+                except ValueError as e:  # One bad slice does not stop the others.
+                    results.append({"ok": False, "status": 400, "error": str(e)})
+            if isinstance(manifest, dict) and isinstance(manifest.get("report"), dict):
+                record_sync(uid, manifest["report"])
+            return self.send_json(200, {"results": results})
+
         if method == "POST" and parts == ["sync"]:
-            report = self.read_json()
-            with _lock:
-                users = load_users()
-                users[uid]["last_sync_at"] = iso(now())
-                users[uid]["last_sync"] = {k: report.get(k) for k in ("reason", "sessions", "slices", "bytes",
-                                                                       "client_version")}
-                if report.get("client_version"):
-                    users[uid]["client_version"] = str(report["client_version"])[:20]
-                save_users(users)
+            record_sync(uid, self.read_json())
             return self.send_json(200, {"ok": True})
 
         return self.send_json(404, {"error": "not found"})
@@ -473,6 +483,44 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         shutil.copyfileobj(spool, self.wfile, 1024 * 1024)
         spool.close()
+
+
+def slice_path_ok(day, tool, sid):
+    return bool(DATE.match(day)) and tool in TOOLS and bool(SESSION.match(sid))
+
+
+def store_slice(uid, day, tool, sid, body, meta):
+    """Writes one day of one session (gzip JSONL), replacing the earlier copy. ValueError when it is not gzip."""
+    if body[:2] != b"\x1f\x8b":
+        raise ValueError("body must be gzip")
+    meta = {k: meta.get(k) for k in ("cwd", "lines", "first", "last", "sha256", "bytes", "media_removed",
+                                     "media_stripped", "secrets_redacted", "redacted")}
+    if meta.get("media_stripped") != media.VERSION:
+        # An older client: replace images here.
+        try:
+            body, raw_bytes, removed = strip_gz(body)
+        except (OSError, EOFError, ValueError):
+            raise ValueError("body is not valid gzip")
+        meta.update({"bytes": raw_bytes, "media_removed": removed, "media_stripped": media.VERSION})
+    folder = os.path.join(user_dir(uid), day)
+    meta.update({"tool": tool, "session_id": sid, "uploaded_at": iso(now()), "gz_bytes": len(body)})
+    data_path = os.path.join(folder, "%s_%s.jsonl.gz" % (tool, sid))
+    with _files_lock:
+        write_atomic(data_path, body)
+        write_atomic(os.path.join(folder, "%s_%s.meta.json" % (tool, sid)), json.dumps(meta).encode())
+        INDEX.put(uid, day, tool, sid, meta, len(body), os.stat(data_path).st_mtime)
+    bump()
+
+
+def record_sync(uid, report):
+    with _lock:
+        users = load_users()
+        users[uid]["last_sync_at"] = iso(now())
+        users[uid]["last_sync"] = {k: report.get(k) for k in ("reason", "sessions", "slices", "bytes",
+                                                               "client_version")}
+        if report.get("client_version"):
+            users[uid]["client_version"] = str(report["client_version"])[:20]
+        save_users(users)
 
 
 def sessions_of(uid, day):

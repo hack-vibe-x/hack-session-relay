@@ -127,12 +127,13 @@ def reason_text(reason):
     key = {"expired": "reason.expired", "invalid": "reason.invalid", "stopped by user": "reason.user"}.get(reason)
     return t(key) if key else reason
 
-VERSION = "0.6.2"
+VERSION = "0.7.0"
 PREFIX = "[session-relay]"
 LABEL = "io.session-relay.sync"
 TIMEOUT = 180
 MAX_SLICE_GZ = 95 * 1024 * 1024
-SAVE_EVERY = 25
+BATCH_BYTES = 8 * 1024 * 1024  # Slices go to the server in requests of about this size (one slice may be larger).
+BATCH_SLICES = 500
 STALE_LOCK = 6 * 60 * 60
 # Updates come only from this repository, at the commit the server names, and must match the server's sha256 list.
 # The commit must also be on this repository's main branch, asked of GitHub itself: GitHub serves a commit pushed to
@@ -479,20 +480,73 @@ def lock():
             os.unlink(p)
 
 
-def upload(cfg, entry, day, piece, cwd):
-    body = gzip.compress(piece["data"], 6)
-    if len(body) > MAX_SLICE_GZ:
-        raise ValueError("slice too large (%d MB compressed)" % (len(body) // 2 ** 20))
-    meta = {"cwd": cwd, "lines": piece["lines"], "first": piece["first"], "last": piece["last"],
-            "sha256": piece["sha256"], "bytes": len(piece["data"]), "media_removed": piece.get("media", 0),
-            "media_stripped": 1, "secrets_redacted": piece.get("secrets", 0), "redacted": redact.VERSION}
-    route = "/v1/sessions/%s/%s/%s" % (day, entry["tool"], urllib.parse.quote(entry["session_id"]))
-    request(cfg, "PUT", route, body, {
-        "Content-Type": "application/x-ndjson",
-        "Content-Encoding": "gzip",
-        "X-Relay-Meta": json.dumps(meta, ensure_ascii=True),
-    })
-    return len(body)
+class Batch:
+    """Slices waiting to go to the server together (POST /v1/batch), a few MB per request.
+
+    A session file counts as done (its size and time are remembered, so it is not read again) only once every one
+    of its changed slices has been accepted; a slice is remembered as sent only when the server accepted it.
+    """
+
+    def __init__(self, cfg, state, result):
+        self.cfg, self.state, self.result = cfg, state, result
+        self.items, self.size = [], 0
+
+    def add(self, rec, day, piece, cwd):
+        body = gzip.compress(piece["data"], 6)
+        if len(body) > MAX_SLICE_GZ:
+            raise ValueError("slice too large (%d MB compressed)" % (len(body) // 2 ** 20))
+        if self.items and (self.size + len(body) > BATCH_BYTES or len(self.items) >= BATCH_SLICES):
+            self.flush()
+        meta = {"cwd": cwd, "lines": piece["lines"], "first": piece["first"], "last": piece["last"],
+                "sha256": piece["sha256"], "bytes": len(piece["data"]), "media_removed": piece.get("media", 0),
+                "media_stripped": 1, "secrets_redacted": piece.get("secrets", 0), "redacted": redact.VERSION}
+        rec["pending"] += 1
+        self.items.append({"rec": rec, "day": day, "sha256": piece["sha256"], "body": body, "meta": meta})
+        self.size += len(body)
+
+    def outlook(self):
+        """The result as it will be once the waiting slices are accepted (for a report sent along with them)."""
+        new_sessions = {id(i["rec"]) for i in self.items if not i["rec"]["uploaded"]}
+        return dict(self.result, slices=self.result["slices"] + len(self.items),
+                    bytes=self.result["bytes"] + self.size, sessions=self.result["sessions"] + len(new_sessions))
+
+    def flush(self, report=None):
+        if not self.items and report is None:
+            return
+        items, self.items, self.size = self.items, [], 0
+        manifest = {"slices": [{"date": i["day"], "tool": i["rec"]["entry"]["tool"], "size": len(i["body"]),
+                                "session_id": i["rec"]["entry"]["session_id"], "meta": i["meta"]} for i in items]}
+        if report is not None:
+            manifest["report"] = report
+        body = b"SRB1\n" + json.dumps(manifest, ensure_ascii=True).encode() + b"\n" + b"".join(
+            i["body"] for i in items)
+        answer = request(self.cfg, "POST", "/v1/batch", body, {"Content-Type": "application/octet-stream"})
+        results = answer.get("results") or []
+        if len(results) != len(items):
+            raise ServerError(502, {"error": "batch answer has %d results for %d slices" % (len(results), len(items))})
+        for item, res in zip(items, results):
+            rec = item["rec"]
+            if res.get("ok"):
+                rec["done"][item["day"]] = item["sha256"]
+                self.result["slices"] += 1
+                self.result["bytes"] += len(item["body"])
+                rec["uploaded"] = True
+            else:
+                self.result["errors"].append("%s %s: %s" % (rec["key"], item["day"], res.get("error")))
+                rec["complete"] = False
+            rec["pending"] -= 1
+            self.settle(rec)
+        save_state(self.state)  # What the server accepted is remembered even if the run stops later.
+
+    def settle(self, rec):
+        """Once a file has no slice waiting: count its session and remember the file if nothing failed."""
+        if rec["pending"] or not rec["added"] or rec.get("settled"):
+            return
+        rec["settled"] = True
+        if rec["uploaded"]:
+            self.result["sessions"] += 1
+        if rec["complete"]:
+            self.state["files"][rec["entry"]["path"]] = rec["stamp"]
 
 
 def sync(cfg, reason, me=None):
@@ -520,24 +574,28 @@ def sync(cfg, reason, me=None):
     result = {"started_at": now_utc().isoformat(), "reason": reason, "sessions": 0, "slices": 0,
               "bytes": 0, "skipped_automated": 0, "errors": [], "client_version": VERSION}
     entries = sources.find_session_files()
+    batch = Batch(cfg, state, result)
     try:
-        sync_files(cfg, entries, files, sent, state, result)
+        sync_files(entries, files, sent, batch, result)
+        result["finished_at"] = now_utc().isoformat()
+        if batch.items:
+            # The last slices and the report for the admin page go in one request.
+            batch.flush(report=dict(batch.outlook(), finished_at=result["finished_at"]))
+        else:
+            try:
+                request(cfg, "POST", "/v1/sync", json.dumps(result).encode(), {"Content-Type": "application/json"})
+            except (ServerError, OSError):
+                pass  # Only a report for the admin page.
     finally:
         save_state(state)  # Keep what was sent even when the run is cut short.
-    result["finished_at"] = now_utc().isoformat()
     state["last_sync_date"] = today()
     state["last_sync_at"] = result["finished_at"]
     state["last_result"] = result
     save_state(state)
-    try:
-        request(cfg, "POST", "/v1/sync", json.dumps(result).encode(), {"Content-Type": "application/json"})
-    except (ServerError, OSError):
-        pass  # Only a report for the admin page.
     return result
 
 
-def sync_files(cfg, entries, files, sent, state, result):
-    since_save = 0
+def sync_files(entries, files, sent, batch, result):
     for i, entry in enumerate(entries):
         try:
             st = os.stat(entry["path"])
@@ -556,36 +614,21 @@ def sync_files(cfg, entries, files, sent, state, result):
             files[entry["path"]] = stamp
             continue
         key = "%s:%s" % (entry["tool"], entry["session_id"])
-        done = sent.setdefault(key, {})
-        complete = True
-        uploaded_any = False
+        rec = {"entry": entry, "key": key, "stamp": stamp, "done": sent.setdefault(key, {}), "pending": 0,
+               "complete": True, "uploaded": False, "added": False}
+        before = result["slices"]
         for day in sorted(parsed["days"]):
             piece = parsed["days"][day]
-            if done.get(day) == piece["sha256"]:
+            if rec["done"].get(day) == piece["sha256"]:
                 continue
             try:
-                result["bytes"] += upload(cfg, entry, day, piece, parsed["cwd"])
+                batch.add(rec, day, piece, parsed["cwd"])
             except ValueError as e:
                 result["errors"].append("%s %s: %s" % (key, day, e))
-                complete = False
-                continue
-            except ServerError as e:
-                if e.status not in (400, 413):
-                    raise
-                result["errors"].append("%s %s: %s" % (key, day, e))
-                complete = False
-                continue
-            done[day] = piece["sha256"]
-            result["slices"] += 1
-            uploaded_any = True
-            since_save += 1
-        if uploaded_any:
-            result["sessions"] += 1
-        if complete:
-            files[entry["path"]] = stamp
-        if since_save >= SAVE_EVERY:
-            save_state(state)
-            since_save = 0
+                rec["complete"] = False
+        rec["added"] = True
+        batch.settle(rec)
+        if result["slices"] != before:
             log("progress %d/%d files, %d slices" % (i + 1, len(entries), result["slices"]))
 
 

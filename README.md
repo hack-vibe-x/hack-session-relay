@@ -73,6 +73,7 @@ Messages are in Korean when the system language is Korean, otherwise in English.
   Days when the computer was off are sent at the next login.
 - **Sessions across midnight**: every line is filed under the local date of its own time. A session used from the night of the 17th into the early 18th lands in both the 17th and the 18th folders.
 - **No duplicates**: the sha256 of every (session, date) slice is kept in `~/.session-relay/state.json`, and only changed slices are sent again. The server overwrites the same slice. "Today" sent in the morning is replaced the next day by the full day.
+- **Few requests**: changed slices go in requests of about 8 MB (`POST /v1/batch`), and the report rides on the last one. A daily sync is two requests (code check, one batch); a first sync of a few hundred slices is a handful. Each slice is accepted or refused on its own, and only accepted slices are recorded as sent.
 - **Ending**: once the stored end time has passed, it stops without calling the server. It also stops when the server says the code has ended or is unknown. Stopping removes the launchd job too.
 - **Secrets and personal information are masked before sending**: see [Sensitive information](#sensitive-information) below.
 - **Images become text**: images and other base64 attachments (screenshots, PDFs) are replaced on the user's computer with a note such as `[image omitted: image/png, 245 KB]`, so they are never uploaded. On one machine this cut the compressed upload by about 80%. The server does the same for uploads from older clients and for files stored before.
@@ -247,6 +248,7 @@ curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main
   컴퓨터가 꺼져 있던 날은 다음 로그인 때 보낸다.
 - **날짜에 걸친 세션**: 각 줄을 그 줄의 시각(로컬 날짜)으로 나눈다. 17일 밤부터 18일 새벽까지 쓴 세션은 17일과 18일 폴더에 나뉘어 들어간다.
 - **중복 방지**: (세션, 날짜) 조각마다 sha256을 `~/.session-relay/state.json`에 기록하고, 바뀐 조각만 다시 보낸다. 서버는 같은 조각을 덮어쓴다. 아침에 보낸 "오늘" 조각은 다음 날 완성본으로 바뀐다.
+- **적은 요청**: 바뀐 조각은 약 8MB씩 묶어 보내고(`POST /v1/batch`), 완료 보고는 마지막 묶음에 붙는다. 매일 동기화는 요청 두 번(코드 확인, 묶음 하나)이고, 조각 수백 개인 첫 동기화도 몇 번이면 끝난다. 조각마다 따로 받아들여지거나 거절되고, 받아들여진 조각만 보낸 것으로 기록한다.
 - **종료**: 저장된 종료 시점이 지나면 서버를 부르지 않고 멈춘다. 서버가 종료됐다거나 코드를 모른다고 답해도 멈춘다. 멈출 때 launchd 작업도 지운다.
 - **비밀값과 개인정보는 가린 뒤 보낸다**: 아래 [민감 정보](#민감-정보)를 보라.
 - **이미지는 글로 바꾼다**: 이미지와 그 밖의 base64 첨부(스크린샷, PDF)는 사용자 컴퓨터에서 `[image omitted: image/png, 245 KB]` 같은 표시로 바뀌어 아예 올라가지 않는다. 한 컴퓨터에서 재 보니 압축 후 업로드가 약 80% 줄었다. 옛 클라이언트가 보낸 업로드와 그 전에 저장된 파일은 서버가 같은 방식으로 바꾼다.
