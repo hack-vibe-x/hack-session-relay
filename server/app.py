@@ -40,6 +40,9 @@ from urllib.parse import parse_qs, unquote, urlparse
 DATA_DIR = os.environ.get("DATA_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "./data"
 ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
 PORT = int(os.environ.get("PORT", "8080"))
+# Local runs stay on this computer. On Railway (and in the Docker image, which sets HOST) it listens on all
+# interfaces so the platform's proxy can reach it.
+HOST = os.environ.get("HOST") or ("0.0.0.0" if os.environ.get("RAILWAY_ENVIRONMENT") else "127.0.0.1")
 MAX_UPLOAD = 100 * 1024 * 1024
 CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ"  # No 0/O, 1/I/L, U: easy to read out and type.
 DATE = re.compile(r"^\d{4}-\d\d-\d\d$")
@@ -411,9 +414,9 @@ def main():
     if os.environ.get("RAILWAY_ENVIRONMENT") and not (os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or os.environ.get("DATA_DIR")):
         sys.stderr.write("warning: no Railway volume attached; uploads are lost on every deploy.\n")
     os.makedirs(DATA_DIR, exist_ok=True)
-    httpd = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     httpd.daemon_threads = True
-    sys.stderr.write("session-relay server on :%d, data in %s\n" % (PORT, os.path.abspath(DATA_DIR)))
+    sys.stderr.write("session-relay server on %s:%d, data in %s\n" % (HOST, PORT, os.path.abspath(DATA_DIR)))
     httpd.serve_forever()
 
 
