@@ -272,7 +272,7 @@ label { display: grid; gap: 5px; font-size: 12px; color: var(--ink-2); }
 
 <script>
 const $ = (s, el = document) => el.querySelector(s);
-const state = { users: [], sel: null, days: [], daysBy: {}, daysErr: 0, view: localGet('view') || 'calendar', month: null, day: null, filter: '', server: '', loadedAt: null };
+const state = { users: [], sel: null, days: [], daysBy: {}, dayCache: {}, rev: null, cached: false, checking: false, checkedAt: 0, view: localGet('view') || 'calendar', month: null, day: null, filter: '', server: '', loadedAt: null };
 const WINDOW = 14;            // days shown in the register
 const QUIET = 2;              // days without a report before a participant counts as quiet
 
@@ -311,13 +311,13 @@ async function api(path, opts = {}) {
 
 async function loadConfig() {
   const c = await api('/config').catch(e => ({ error: e.message }));
-  state.server = c.server_url || '';
-  $('#server').innerHTML = c.ready ? `<span class="mono">${esc(c.server_url.replace(/^https?:\/\//, ''))}</span>` : '설정 필요: admin/config.json';
-  if (c.ready) {
-    const r = await api('/client').catch(() => ({}));
-    state.release = r.client || null;
-    if (state.release) $('#server').insertAdjacentHTML('beforeend', ` · 배포 클라이언트 <span class="mono">${esc(state.release.version)}</span>`);
-  }
+  state.server = c.ready ? c.server_url : '';
+  renderServer();
+  return c.ready;
+}
+function renderServer() {
+  $('#server').innerHTML = state.server ? `<span class="mono">${esc(state.server.replace(/^https?:\/\//, ''))}</span>${
+    state.release ? ` · 배포 클라이언트 <span class="mono">${esc(state.release.version)}</span>` : ''}` : '설정 필요: admin/config.json';
 }
 
 // What is on screen (user, month, day, search, filter) lives in the address (#u=...&m=...&d=...&q=...&f=...), so a
@@ -347,7 +347,8 @@ function restoreView() {
 // ----- what each participant's row says -----
 function facts(u) {
   const today = ymd(new Date());
-  const active = u.status === 'active';
+  // From the end time, not the server's status: a kept overview may be older than the moment a code ended.
+  const active = !u.expires_at || new Date(u.expires_at) > new Date();
   const started = u.activated_at ? ymd(new Date(u.activated_at)) : null;
   const synced = u.last_sync_at ? ymd(new Date(u.last_sync_at)) : null;
   const since = active && started ? daysBetween(synced || started, today) : 0;
@@ -437,49 +438,60 @@ function renderRegister() {
   }).join('') : `<tr class="empty"><td colspan="${WINDOW + 5}">${!state.loadedAt ? '불러오는 중…' : state.users.length ? '조건에 맞는 참가자가 없습니다.' : '아직 발행한 코드가 없습니다. 오른쪽 위 ‘새 코드 발행’으로 시작하세요.'}</td></tr>`;
   $('#sheet').innerHTML = `<table class="reg">${head}<tbody>${body}</tbody></table>`;
   $('#foot').innerHTML = `<span>${rows.length}명 표시 · 최근 ${WINDOW}일 (${md(days[0].key)} ~ ${md(days[WINDOW - 1].key)})</span>${
-    state.daysErr ? `<span class="err">${state.daysErr}명의 날짜 기록을 불러오지 못했습니다</span>` : ''}${state.loadedAt ? `<span>불러온 시각 ${hm(state.loadedAt)}</span>` : ''}`;
+    state.loadedAt ? `<span>${state.cached ? `${fmtTime(state.loadedAt)}에 받은 기록${state.checking ? ' · 서버 확인 중…' : ''}` : `서버 확인 ${hm(state.loadedAt)}`}</span>` : ''}`;
 }
 
-// Each participant's dates, a few requests at a time; the register fills in as they land.
-async function loadAllDays() {
-  const queue = state.users.map(u => u.id);
-  state.daysErr = 0;
-  let pending = false;
-  const paint = () => { if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; renderRegister(); }); } };
-  const worker = async () => {
-    while (queue.length) {
-      const id = queue.shift();
-      try { state.daysBy[id] = Object.fromEntries((await api(`/users/${id}/days`)).days.map(d => [d.date, d])); }
-      catch { state.daysErr++; }
-      paint();
-    }
-  };
-  await Promise.all(Array.from({ length: 6 }, worker));
-}
-
-async function loadUsers() {
-  try { state.users = (await api('/users')).users; }
-  catch (e) { $('#sheet').innerHTML = `<div class="empty err">${esc(e.message)}</div>`; return; }
-  state.loadedAt = new Date().toISOString();
+// One answer holds every participant with all their dates. admin.py keeps the last one: the page draws from it
+// at once, then asks the server whether anything changed (304 when nothing did, so that check is cheap).
+function applyOverview(d, cached) {
+  if (d.rev !== state.rev) state.dayCache = {};
+  state.rev = d.rev;
+  state.users = d.users;
+  state.daysBy = Object.fromEntries(d.users.map(u => [u.id, Object.fromEntries((u.days || []).map(x => [x.date, x]))]));
+  state.release = d.client || null;
+  state.cached = cached;
+  state.loadedAt = d.fetched_at || new Date().toISOString();
   if (state.sel && !state.users.some(u => u.id === state.sel.id)) { state.sel = null; state.day = null; state.month = null; saveView(); }
+  renderServer();
   renderRegister();
   if (state.sel) selectUser(state.users.find(u => u.id === state.sel.id), true);
   else renderDetail();
-  loadAllDays();
 }
 
-async function selectUser(u, keep) {
+async function loadOverview() {
+  if (state.checking) return;
+  if (!state.loadedAt) {
+    const kept = await api('/overview?cached=1').catch(() => ({}));
+    if (kept.users) applyOverview(kept, true);
+  }
+  state.checking = true; state.checkedAt = Date.now();
+  if (state.cached) renderRegister();
+  try { applyOverview(await api('/overview'), false); }
+  catch (e) {
+    if (state.users.length) toast('서버 확인 실패: ' + e.message);
+    else $('#sheet').innerHTML = `<div class="empty err">${esc(e.message)}</div>`;
+  } finally { state.checking = false; if (state.loadedAt) renderRegister(); }
+}
+
+// A participant record from issuing or changing a code: placed in the list without asking the server again.
+function putUser(user) {
+  const i = state.users.findIndex(u => u.id === user.id);
+  if (i < 0) state.users.unshift({ days: [], ...user });
+  else state.users[i] = { ...state.users[i], ...user };
+  const u = state.users[i < 0 ? 0 : i];
+  state.daysBy[u.id] = Object.fromEntries((u.days || []).map(x => [x.date, x]));
+  return u;
+}
+
+function selectUser(u, keep) {
   const was = state.sel && state.sel.id;
   state.sel = u;
   if (!keep) { state.day = null; state.month = null; }
+  state.days = u.days || [];
+  if (!state.month) { const d = state.days[0] ? dateOf(state.days[0].date) : new Date(); state.month = new Date(d.getFullYear(), d.getMonth(), 1); }
   saveView();
   renderRegister();
   renderDetail(!keep && was !== u.id);
-  try { state.days = (await api(`/users/${u.id}/days`)).days; state.daysBy[u.id] = Object.fromEntries(state.days.map(d => [d.date, d])); }
-  catch (e) { state.days = []; toast(e.message); }
-  if (!state.month) { const d = state.days[0] ? dateOf(state.days[0].date) : new Date(); state.month = new Date(d.getFullYear(), d.getMonth(), 1); }
-  saveView();
-  renderDetail();
   if (matchMedia('(max-width: 760px)').matches && !keep) $('#detail').scrollIntoView({ block: 'start' });
 }
 
@@ -547,9 +559,15 @@ async function loadDay(day) {
   document.querySelectorAll('#detail [data-day]').forEach(el => el.classList.toggle('sel', el.dataset.day === day));
   const panel = $('#dayPanel');
   if (!panel) return;
-  panel.innerHTML = `<div class="empty">불러오는 중…</div>`;
-  let sessions;
-  try { sessions = (await api(`/users/${state.sel.id}/days/${day}`)).sessions; } catch (e) { panel.innerHTML = `<div class="empty err">${esc(e.message)}</div>`; return; }
+  // Kept until the overview reports a change on the server (state.rev), so going back to a day asks nothing.
+  const key = state.sel.id + '/' + day;
+  let sessions = state.dayCache[key];
+  if (!sessions) {
+    panel.innerHTML = `<div class="empty">불러오는 중…</div>`;
+    try { sessions = state.dayCache[key] = (await api(`/users/${state.sel.id}/days/${day}`)).sessions; }
+    catch (e) { panel.innerHTML = `<div class="empty err">${esc(e.message)}</div>`; return; }
+    if (state.day !== day || !$('#dayPanel')) return;  // Another day was picked while this one loaded.
+  }
   panel.innerHTML = `<div class="day-h"><h3>${day} (${DOW[dateOf(day).getDay()]}) · 세션 ${sessions.length}</h3><button class="btn small" data-dl="${day}">이 날 zip 받기</button></div>
     <ol class="sess">${sessions.map(s => {
       const key = s.tool + '_' + s.session_id;
@@ -606,7 +624,9 @@ function instructions(u) {
 $('#sheet').addEventListener('click', e => { const el = e.target.closest('[data-id]'); if (el) selectUser(state.users.find(u => u.id === el.dataset.id)); });
 $('#tally').addEventListener('click', e => { const b = e.target.closest('[data-f]'); if (!b) return; state.filter = state.filter === b.dataset.f ? '' : b.dataset.f; saveView(); renderRegister(); });
 $('#q').addEventListener('input', () => { renderRegister(); saveView(); });
-$('#refresh').addEventListener('click', () => { state.daysBy = {}; loadUsers(); });
+$('#refresh').addEventListener('click', loadOverview);
+// Back on the tab after a while: one conditional request brings the list up to date.
+document.addEventListener('visibilitychange', () => { if (!document.hidden && state.server && Date.now() - state.checkedAt > 60e3) loadOverview(); });
 $('#new').addEventListener('click', () => { $('#issueForm').reset(); $('#issueErr').textContent = ''; const d = new Date(); d.setMonth(d.getMonth() + 3); $('#issueForm').end.value = ymd(d); $('#issue').showModal(); });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && state.sel && !document.querySelector('dialog[open]')) closeDetail();
@@ -622,7 +642,7 @@ $('#issueForm').addEventListener('submit', async e => {
     $('#issue').close();
     $('#doneCode').textContent = user.code; $('#doneMsg').textContent = instructions(user);
     $('#done').showModal();
-    state.sel = user; await loadUsers();
+    selectUser(putUser(user));
   } catch (err) { $('#issueErr').textContent = err.message; }
   finally { $('#issueBtn').disabled = false; }
 });
@@ -632,7 +652,7 @@ $('#closeDone').addEventListener('click', () => $('#done').close());
 $('#extendForm').addEventListener('submit', async e => {
   if (e.submitter && e.submitter.value === 'cancel') return;
   e.preventDefault();
-  try { await api(`/users/${state.sel.id}`, { method: 'PATCH', body: JSON.stringify({ expires_at: endOfDay(e.target.end.value) }) }); $('#extend').close(); toast('종료일을 바꿨습니다'); loadUsers(); }
+  try { const { user } = await api(`/users/${state.sel.id}`, { method: 'PATCH', body: JSON.stringify({ expires_at: endOfDay(e.target.end.value) }) }); $('#extend').close(); toast('종료일을 바꿨습니다'); selectUser(putUser(user), true); }
   catch (err) { toast(err.message); }
 });
 
@@ -649,7 +669,7 @@ $('#detail').addEventListener('click', async e => {
   if (t.id === 'extendBtn') { $('#extendForm').end.value = fmtDate(state.sel.expires_at); $('#extend').showModal(); return; }
   if (t.id === 'endNow') {
     if (!confirm(`${phone(state.sel.phone)} 의 코드를 지금 종료할까요?\n사용자 컴퓨터는 다음 동기화 때 이를 확인하고 서버 호출을 멈춥니다.`)) return;
-    try { await api(`/users/${state.sel.id}`, { method: 'PATCH', body: JSON.stringify({ expires_at: 'now' }) }); toast('종료했습니다'); loadUsers(); } catch (err) { toast(err.message); }
+    try { const { user } = await api(`/users/${state.sel.id}`, { method: 'PATCH', body: JSON.stringify({ expires_at: 'now' }) }); toast('종료했습니다'); selectUser(putUser(user), true); } catch (err) { toast(err.message); }
     return;
   }
   if (t.dataset.goto) {
@@ -665,7 +685,7 @@ $('#detail').addEventListener('click', async e => {
 
 restoreView();
 renderRegister();
-loadConfig().then(loadUsers);
+loadConfig().then(ready => { if (ready) loadOverview(); });
 </script>
 </body>
 </html>

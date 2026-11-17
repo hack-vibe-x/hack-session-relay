@@ -3,8 +3,10 @@
 
 Storage (DATA_DIR, the Railway volume):
   users.json                                  one record per code: phone, sha256 of the code, end time
+                                              (read once at start and kept in memory; rewritten on every change)
   users/<user id>/<YYYY-MM-DD>/<tool>_<session>.jsonl.gz      one session's lines for that local date
   users/<user id>/<YYYY-MM-DD>/<tool>_<session>.meta.json     project folder, line count, first/last time
+  index.db                                    SQLite index of those files (store.py); rebuilt from them when missing
 
 Client API (Authorization: Bearer <code>):
   GET  /v1/me                                 is the code valid; its end time
@@ -13,7 +15,10 @@ Client API (Authorization: Bearer <code>):
   An ended code gets 403 {"status": "expired"}; an unknown code 401 {"status": "invalid"}.
 
 Admin API (Authorization: Bearer <ADMIN_KEY>):
-  GET   /admin/users                          every user with totals
+  GET   /admin/overview                       everything the admin page opens with, in one answer: every user with
+                                              totals and dates, and the client release. ETag: If-None-Match gets
+                                              304 when nothing changed since. Every JSON answer is gzip on request.
+  GET   /admin/users                          every user with totals and dates
   POST  /admin/users {phone, expires_at, memo}   issue a code; the code is only in this response
   PATCH /admin/users/<id> {expires_at, memo, resend}  change the end time ("now" ends it now); resend: true asks
                                               the user's computer to send everything again at its next sync
@@ -43,6 +48,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 import media
+import store
 
 DATA_DIR = os.environ.get("DATA_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "./data"
 ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
@@ -60,8 +66,13 @@ RELEASE_FILE = re.compile(r"^(client/[a-z_]+\.(?:py|json)|skill/SKILL\.md)$")
 CLIENT_AGENT = re.compile(r"session-relay/([0-9]+(?:\.[0-9]+)*)")
 
 _lock = threading.Lock()
+_lock_rev = threading.Lock()
 _files_lock = threading.Lock()  # Uploads and the image cleanup never write the same session file at once.
 _failures = {}  # ip -> [count, first time]; slows down guessing codes.
+_users = None  # users.json in memory: {"by_id": {...}, "by_hash": {code sha256: id}}
+INDEX = None  # store.Index, opened in main()
+# Changes on every write (user, upload, release). With the start's random part it is the overview's ETag.
+_rev = [secrets.token_hex(4), 0]
 
 
 def now():
@@ -123,16 +134,35 @@ def user_dir(uid):
     return os.path.join(DATA_DIR, "users", uid)
 
 
+def bump():
+    with _lock_rev:
+        _rev[1] += 1
+
+
+def etag():
+    return '"%s.%d"' % (_rev[0], _rev[1])
+
+
+def _remember(users):
+    global _users
+    _users = {"by_id": users, "by_hash": {u["code_sha256"]: uid for uid, u in users.items()}}
+
+
 def load_users():
-    try:
-        with open(users_file(), encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
+    """A copy of every user; change it and pass it to save_users. Only this process writes users.json."""
+    if _users is None:
+        try:
+            with open(users_file(), encoding="utf-8") as f:
+                _remember(json.load(f))
+        except FileNotFoundError:
+            _remember({})
+    return json.loads(json.dumps(_users["by_id"]))
 
 
 def save_users(users):
     write_atomic(users_file(), json.dumps(users, ensure_ascii=False, indent=1).encode())
+    _remember(json.loads(json.dumps(users)))
+    bump()
 
 
 def write_atomic(path, data):
@@ -149,41 +179,21 @@ def status_of(user):
 
 
 def find_by_code(code):
-    h = code_hash(code)
-    for uid, user in load_users().items():
-        if hmac.compare_digest(user["code_sha256"], h):
-            return uid, user
-    return None, None
+    load_users()
+    uid = _users["by_hash"].get(code_hash(code))  # A dict lookup on the hash: no comparison of the code itself.
+    return (uid, load_users()[uid]) if uid else (None, None)
 
 
 def days_of(uid):
-    base = user_dir(uid)
-    out = []
-    try:
-        names = sorted(os.listdir(base), reverse=True)
-    except FileNotFoundError:
-        return out
-    for name in names:
-        if not DATE.match(name):
-            continue
-        sessions, size = 0, 0
-        tools = {}
-        for f in os.listdir(os.path.join(base, name)):
-            if f.endswith(".jsonl.gz"):
-                sessions += 1
-                size += os.path.getsize(os.path.join(base, name, f))
-                tool = f.split("_", 1)[0]
-                tools[tool] = tools.get(tool, 0) + 1
-        if sessions:
-            out.append({"date": name, "sessions": sessions, "bytes": size, "tools": tools})
-    return out
+    return INDEX.days(uid).get(uid, [])
 
 
-def public_user(uid, user):
+def public_user(uid, user, days=None):
     out = {k: v for k, v in user.items() if k != "code_sha256"}
     out["id"] = uid
     out["status"] = status_of(user)
-    days = days_of(uid)
+    days = days_of(uid) if days is None else days
+    out["days"] = days
     out["days_count"] = len(days)
     out["sessions_total"] = sum(d["sessions"] for d in days)
     out["bytes_total"] = sum(d["bytes"] for d in days)
@@ -203,10 +213,16 @@ class Handler(BaseHTTPRequestHandler):
     def client_ip(self):
         return (self.headers.get("X-Forwarded-For") or self.client_address[0]).split(",")[0].strip()
 
-    def send_json(self, status, data):
+    def send_json(self, status, data, headers=None):
         body = json.dumps(data, ensure_ascii=False).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        if len(body) > 1400 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+            body = gzip.compress(body, 6)
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -318,9 +334,12 @@ class Handler(BaseHTTPRequestHandler):
                 meta.update({"bytes": raw_bytes, "media_removed": removed, "media_stripped": media.VERSION})
             folder = os.path.join(user_dir(uid), day)
             meta.update({"tool": tool, "session_id": sid, "uploaded_at": iso(now()), "gz_bytes": len(body)})
+            data_path = os.path.join(folder, "%s_%s.jsonl.gz" % (tool, sid))
             with _files_lock:
-                write_atomic(os.path.join(folder, "%s_%s.jsonl.gz" % (tool, sid)), body)
+                write_atomic(data_path, body)
                 write_atomic(os.path.join(folder, "%s_%s.meta.json" % (tool, sid)), json.dumps(meta).encode())
+                INDEX.put(uid, day, tool, sid, meta, len(body), os.stat(data_path).st_mtime)
+            bump()
             return self.send_json(200, {"ok": True})
 
         if method == "POST" and parts == ["sync"]:
@@ -353,13 +372,23 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("files must map client/*.py, client/*.json and skill/SKILL.md to sha256")
             release = {"version": version, "ref": ref, "files": files, "released_at": iso(now())}
             write_atomic(release_file(), json.dumps(release, indent=1).encode())
+            bump()
             return self.send_json(200, {"client": release})
 
-        if parts == ["users"] and method == "GET":
-            users = load_users()
-            listed = [public_user(uid, u) for uid, u in users.items()]
+        if parts in (["users"], ["overview"]) and method == "GET":
+            tag = etag()  # Taken before reading: a write during the read makes the next request fetch again.
+            if parts == ["overview"] and self.headers.get("If-None-Match") == tag:
+                self.send_response(304)
+                self.send_header("ETag", tag)
+                self.send_header("Content-Length", "0")
+                return self.end_headers()
+            days = INDEX.days()
+            listed = [public_user(uid, u, days.get(uid, [])) for uid, u in load_users().items()]
             listed.sort(key=lambda u: u.get("created_at") or "", reverse=True)
-            return self.send_json(200, {"users": listed})
+            if parts == ["users"]:
+                return self.send_json(200, {"users": listed})
+            return self.send_json(200, {"users": listed, "client": load_release(), "rev": tag,
+                                        "server_time": iso(now())}, {"ETag": tag})
 
         if parts == ["users"] and method == "POST":
             data = self.read_json()
@@ -447,26 +476,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def sessions_of(uid, day):
-    base = os.path.join(user_dir(uid), day)
-    out = []
-    try:
-        names = sorted(os.listdir(base))
-    except FileNotFoundError:
-        return out
-    # Every date folder of this user, to show on which days the same session also appears.
-    all_days = sorted(d for d in os.listdir(user_dir(uid)) if DATE.match(d))
-    for name in names:
-        if name.endswith(".meta.json"):
-            try:
-                with open(os.path.join(base, name), encoding="utf-8") as f:
-                    meta = json.load(f)
-            except (OSError, ValueError):
-                continue
-            data_name = name[:-len(".meta.json")] + ".jsonl.gz"
-            meta["dates"] = [d for d in all_days if os.path.exists(os.path.join(user_dir(uid), d, data_name))]
-            out.append(meta)
-    out.sort(key=lambda m: m.get("first") or "")
-    return out
+    return INDEX.sessions(uid, day)
 
 
 def strip_gz(body):
@@ -510,6 +520,11 @@ def clean_stored_media():
                         continue  # A new upload arrived meanwhile; it was stripped on the way in.
                     write_atomic(data_path, new)
                     write_atomic(meta_path, json.dumps(meta).encode())
+                    day = os.path.basename(root)
+                    tool, sid = name[:-len(".meta.json")].split("_", 1)
+                    INDEX.put(os.path.basename(os.path.dirname(root)), day, tool, sid, meta, len(new),
+                              os.stat(data_path).st_mtime)
+                bump()
                 done += 1
                 saved += len(old) - len(new)
             except Exception as e:  # noqa: BLE001 — one bad file must not stop the rest.
@@ -528,6 +543,12 @@ def main():
                          "container's temporary disk. Attach the volume and deploy again.\n" % DATA_DIR)
         sys.exit(1)
     os.makedirs(DATA_DIR, exist_ok=True)
+    global INDEX
+    INDEX = store.Index(os.path.join(DATA_DIR, "index.db"))
+    started = time.time()
+    changed = INDEX.reconcile(os.path.join(DATA_DIR, "users"))  # Before serving, so the first answers are whole.
+    sys.stderr.write("index: %d slices updated in %.1fs\n" % (changed, time.time() - started))
+    load_users()
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     httpd.daemon_threads = True
     threading.Thread(target=clean_stored_media, daemon=True).start()

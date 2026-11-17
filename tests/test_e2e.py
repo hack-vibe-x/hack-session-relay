@@ -6,6 +6,7 @@ python3 (3.9) when it exists. Nothing touches the real ~/.claude, ~/.codex or la
 """
 import datetime
 import functools
+import gzip
 import hashlib
 import re
 import threading
@@ -371,6 +372,58 @@ class E2E(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("already ended", out)
 
+    def test_index_overview_and_restart(self):
+        uid, code = self.issue(phone="010-5555-0000")
+        rc, out = self.relay("init", "--code", code, "--no-job", "--foreground", now="2026-11-17 09:00")
+        self.assertEqual(rc, 0, out)
+        req = urllib.request.Request(self.url + "/admin/overview", headers={
+            "Authorization": "Bearer " + KEY, "Accept-Encoding": "gzip"})
+        with urllib.request.urlopen(req, timeout=10) as res:
+            self.assertEqual(res.headers["Content-Encoding"], "gzip")
+            tag = res.headers["ETag"]
+            data = json.loads(gzip.decompress(res.read()))
+        user = [u for u in data["users"] if u["id"] == uid][0]
+        self.assertEqual([d["date"] for d in user["days"]], ["2026-11-17", "2026-11-16"])
+        self.assertEqual(user["days"][1]["tools"], {"claude": 1, "codex": 1})
+        self.assertEqual((user["days_count"], user["sessions_total"]), (2, 3))
+        self.assertEqual(data["rev"], tag)
+
+        def conditional(etag):
+            r = urllib.request.Request(self.url + "/admin/overview", headers={
+                "Authorization": "Bearer " + KEY, "If-None-Match": etag})
+            try:
+                with urllib.request.urlopen(r, timeout=10) as res:
+                    return res.status
+            except urllib.error.HTTPError as e:
+                return e.code
+
+        self.assertEqual(conditional(tag), 304)
+        call(self.url + "/admin/users/" + uid, "PATCH", {"memo": "changed"})
+        self.assertEqual(conditional(tag), 200)  # Any write changes the ETag.
+
+        sessions = call(self.url + "/admin/users/%s/days/2026-11-17" % uid)["sessions"]
+        self.assertEqual(sessions[0]["dates"], ["2026-11-16", "2026-11-17"])
+
+        # The index is derived: a second server on the same folder, with the index deleted, answers the same.
+        data_dir = os.path.join(self.tmp, "server")
+        copy = os.path.join(self.tmp, "server-copy")
+        shutil.copytree(data_dir, copy)
+        for name in os.listdir(copy):
+            if name.startswith("index.db"):
+                os.remove(os.path.join(copy, name))
+        port = free_port()
+        proc = subprocess.Popen([sys.executable, SERVER], env=dict(
+            os.environ, DATA_DIR=copy, ADMIN_KEY=KEY, PORT=str(port)), stderr=subprocess.DEVNULL)
+        try:
+            other = "http://127.0.0.1:%d" % port
+            wait_up(other)
+            self.assertEqual(call(other + "/admin/users/%s/days" % uid)["days"], user["days"])
+            self.assertEqual(call(other + "/admin/users/%s/days/2026-11-17" % uid)["sessions"], sessions)
+            self.assertEqual(call(other + "/v1/me", key=code)["status"], "active")  # Users load from users.json.
+        finally:
+            proc.terminate()
+            proc.wait()
+
     def test_admin_requires_key(self):
         with self.assertRaises(urllib.error.HTTPError) as e:
             call(self.url + "/admin/users", key="wrong")
@@ -399,6 +452,24 @@ class E2E(unittest.TestCase):
                 self.assertEqual(json.load(f)[res["user"]["id"]]["code"], code)
             listed = call(base + "/api/users")["users"]
             self.assertEqual([u["code"] for u in listed if u["id"] == res["user"]["id"]], [code])
+            # The overview: kept after the first fetch, then checked with one conditional request.
+            self.assertIsNone(call(base + "/api/overview?cached=1")["users"])
+            fresh = call(base + "/api/overview")
+            self.assertFalse(fresh["cached"])
+            self.assertEqual([u["code"] for u in fresh["users"] if u["id"] == res["user"]["id"]], [code])
+            kept = call(base + "/api/overview?cached=1")
+            self.assertTrue(kept["cached"])
+            self.assertEqual(kept["rev"], fresh["rev"])
+            self.assertEqual(call(base + "/api/overview")["rev"], fresh["rev"])  # 304 upstream: same data.
+            with open(os.path.join(data, "overview.json")) as f:
+                self.assertEqual(json.load(f)["etag"], fresh["rev"])
+            self.assertEqual(os.stat(os.path.join(data, "overview.json")).st_mode & 0o777, 0o600)
+            # A change made here shows in the kept copy at once, and the next check brings the server's answer.
+            call(base + "/api/users/" + res["user"]["id"], "PATCH", {"memo": "edited"})
+            kept = call(base + "/api/overview?cached=1")
+            self.assertEqual([u["memo"] for u in kept["users"] if u["id"] == res["user"]["id"]], ["edited"])
+            again = call(base + "/api/overview")
+            self.assertNotEqual(again["rev"], fresh["rev"])
             req = urllib.request.Request(base + "/api/users", headers={"Origin": "https://evil.example"})
             with self.assertRaises(urllib.error.HTTPError):
                 urllib.request.urlopen(req)
