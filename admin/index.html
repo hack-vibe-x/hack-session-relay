@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Relay 관리</title>
+<style>
+:root {
+  --bg: #f6f6f3; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #e4e3dd;
+  --accent: #2f5d50; --accent-ink: #ffffff; --accent-soft: #e3ece8;
+  --warn: #9a3b2e; --warn-soft: #f6e5e1; --heat-1: #d4e4dd; --heat-2: #9cc2b3; --heat-3: #5b9583; --heat-4: #2f5d50;
+  --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161715; --panel: #1f201e; --ink: #ecebe6; --muted: #9a9a93; --line: #31322f;
+    --accent: #7fb8a4; --accent-ink: #11231d; --accent-soft: #23332d;
+    --warn: #e08a7b; --warn-soft: #3a2420; --heat-1: #24372f; --heat-2: #2f5a4a; --heat-3: #4d8a73; --heat-4: #7fb8a4;
+    --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Segoe UI", sans-serif; }
+button, input, select { font: inherit; color: inherit; }
+header.top { display: flex; align-items: center; gap: 12px; padding: 14px 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+header.top h1 { font-size: 15px; margin: 0; letter-spacing: -.01em; }
+header.top .server { color: var(--muted); font-size: 12px; font-family: ui-monospace, Menlo, monospace; }
+header.top .grow { flex: 1; }
+.btn { border: 1px solid var(--line); background: var(--panel); padding: 7px 12px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.danger { color: var(--warn); }
+.btn.small { padding: 4px 9px; font-size: 12px; }
+.btn:disabled { opacity: .5; cursor: default; }
+main { display: grid; grid-template-columns: 320px 1fr; min-height: calc(100vh - 57px); }
+aside { border-right: 1px solid var(--line); background: var(--panel); overflow-y: auto; }
+aside .search { padding: 12px; border-bottom: 1px solid var(--line); }
+input[type=text], input[type=tel], input[type=date] { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.user { padding: 12px 16px; border-bottom: 1px solid var(--line); cursor: pointer; display: grid; gap: 2px; }
+.user:hover { background: var(--bg); }
+.user.on { background: var(--accent-soft); }
+.user .row1 { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.user .phone { font-weight: 600; font-variant-numeric: tabular-nums; }
+.user .sub { color: var(--muted); font-size: 12px; }
+.badge { font-size: 11px; padding: 1px 7px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+.badge.off { background: var(--warn-soft); color: var(--warn); }
+section.detail { padding: 24px 28px 48px; overflow-y: auto; }
+.empty { color: var(--muted); padding: 48px 0; text-align: center; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; box-shadow: var(--shadow); margin-bottom: 16px; }
+.head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.head h2 { margin: 0; font-size: 22px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.head .memo { color: var(--muted); }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px 20px; }
+.fact .k { color: var(--muted); font-size: 12px; margin-bottom: 2px; }
+.fact .v { font-variant-numeric: tabular-nums; }
+.code { font-family: ui-monospace, Menlo, monospace; letter-spacing: .04em; }
+.inline { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.toolbar h3 { margin: 0; font-size: 15px; flex: 1; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: transparent; padding: 6px 12px; cursor: pointer; }
+.seg button.on { background: var(--accent); color: var(--accent-ink); }
+.range { display: flex; gap: 6px; align-items: center; }
+.range input { width: 140px; padding: 5px 8px; }
+.cal-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.cal-nav .month { font-weight: 600; min-width: 110px; text-align: center; font-variant-numeric: tabular-nums; }
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.tablewrap { overflow-x: auto; margin: 0 -4px; }
+.tablewrap table { min-width: 100%; }
+.cal .dow { color: var(--muted); font-size: 12px; text-align: center; padding-bottom: 2px; }
+.day { aspect-ratio: 1.35; border-radius: 8px; border: 1px solid var(--line); padding: 6px 8px; display: flex; flex-direction: column; justify-content: space-between; font-variant-numeric: tabular-nums; background: var(--panel); }
+.day.out { visibility: hidden; }
+.day .n { font-size: 12px; color: var(--muted); }
+.day .n, .day .c { line-height: 1.1; }
+.day .c { font-size: 12px; font-weight: 600; align-self: flex-end; }
+.day.has { cursor: pointer; border-color: transparent; }
+.day.has .n { color: inherit; }
+.day.h1 { background: var(--heat-1); } .day.h2 { background: var(--heat-2); }
+.day.h3 { background: var(--heat-3); color: #fff; } .day.h4 { background: var(--heat-4); color: var(--accent-ink); }
+.day.today { outline: 2px dashed var(--muted); outline-offset: -3px; }
+.day.sel { outline: 2px solid var(--ink); outline-offset: 1px; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 500; font-size: 12px; }
+tr.click { cursor: pointer; } tr.click:hover td { background: var(--bg); } tr.sel td { background: var(--accent-soft); }
+td.num, th.num { text-align: right; }
+.tool { font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); }
+.path { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted); }
+dialog { border: 1px solid var(--line); border-radius: 14px; padding: 0; width: min(460px, calc(100vw - 32px)); background: var(--panel); color: var(--ink); }
+dialog::backdrop { background: rgba(0,0,0,.35); }
+dialog form, dialog .body { padding: 20px 22px; display: grid; gap: 12px; }
+dialog h3 { margin: 0; font-size: 16px; }
+label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.presets { display: flex; gap: 6px; flex-wrap: wrap; }
+.actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.issued { font-size: 22px; text-align: center; padding: 14px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); }
+.msg { white-space: pre-wrap; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 13px; color: var(--ink); }
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 99px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+.toast.show { opacity: 1; }
+.err { color: var(--warn); font-size: 13px; }
+@media (max-width: 760px) {
+  header.top { flex-wrap: wrap; padding: 12px 16px; gap: 8px; }
+  header.top .server { order: 5; flex-basis: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card { padding: 14px; }
+  .toolbar h3 { flex-basis: 100%; }
+  .range { flex-wrap: wrap; width: 100%; }
+  .range input { flex: 1 1 130px; width: auto; min-width: 130px; }
+  .cal { gap: 3px; }
+  .cal-nav .path { display: none; }
+  .hide-sm { display: none; }
+  main { grid-template-columns: 1fr; }
+  aside { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; }
+  section.detail { padding: 16px; }
+  .day { aspect-ratio: 1; padding: 4px; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Session Relay</h1>
+  <span class="server" id="server"></span>
+  <span class="grow"></span>
+  <button class="btn" id="refresh">새로고침</button>
+  <button class="btn primary" id="new">새 코드 발행</button>
+</header>
+<main>
+  <aside>
+    <div class="search"><input type="text" id="q" placeholder="전화번호·메모 검색"></div>
+    <div id="users"></div>
+  </aside>
+  <section class="detail" id="detail"><div class="empty">왼쪽에서 사용자를 고르세요.</div></section>
+</main>
+
+<dialog id="issue">
+  <form method="dialog" id="issueForm">
+    <h3>새 코드 발행</h3>
+    <label>전화번호<input type="tel" name="phone" placeholder="010-1234-5678" required></label>
+    <label>메모 (선택)<input type="text" name="memo" placeholder="소속, 이름 등"></label>
+    <label>종료일 (이 날 23:59까지 사용)<input type="date" name="end" required></label>
+    <div class="presets" data-target="end"></div>
+    <div class="err" id="issueErr"></div>
+    <div class="actions"><button class="btn" value="cancel" formnovalidate>취소</button><button class="btn primary" id="issueBtn" value="ok">발행</button></div>
+  </form>
+</dialog>
+
+<dialog id="done">
+  <div class="body">
+    <h3>코드가 발행되었습니다</h3>
+    <div class="issued code" id="doneCode"></div>
+    <div class="msg" id="doneMsg"></div>
+    <div class="actions"><button class="btn" id="copyMsg">안내문 복사</button><button class="btn primary" id="closeDone">닫기</button></div>
+  </div>
+</dialog>
+
+<dialog id="extend">
+  <form method="dialog" id="extendForm">
+    <h3>종료일 변경</h3>
+    <label>새 종료일 (이 날 23:59까지)<input type="date" name="end" required></label>
+    <div class="presets" data-target="end"></div>
+    <div class="actions"><button class="btn" value="cancel" formnovalidate>취소</button><button class="btn primary" value="ok">저장</button></div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const state = { users: [], sel: null, days: [], view: localGet('view') || 'calendar', month: null, day: null, server: '' };
+
+function localGet(k) { try { return localStorage.getItem('sr.' + k); } catch { return null; } }
+function localSet(k, v) { try { localStorage.setItem('sr.' + k, v); } catch {} }
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 2200); }
+function size(b) { if (!b) return '0'; const u = ['B', 'KB', 'MB', 'GB']; let i = 0; while (b >= 1024 && i < 3) { b /= 1024; i++; } return (i ? b.toFixed(1) : b) + ' ' + u[i]; }
+function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function fmtDate(iso) { if (!iso) return '—'; return ymd(new Date(iso)); }
+function fmtTime(iso) { if (!iso) return '—'; const d = new Date(iso); return ymd(d) + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+function hm(iso) { if (!iso) return ''; const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+function endOfDay(dateStr) { const [y, m, d] = dateStr.split('-').map(Number); return new Date(y, m - 1, d, 23, 59, 59).toISOString(); }
+const DOW = ['일', '월', '화', '수', '목', '금', '토'];
+
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ('오류 ' + res.status));
+  return data;
+}
+
+async function loadConfig() {
+  const c = await api('/config').catch(e => ({ error: e.message }));
+  state.server = c.server_url || '';
+  $('#server').textContent = c.ready ? c.server_url : '설정 필요: admin/config.json';
+}
+
+async function loadUsers() {
+  try { state.users = (await api('/users')).users; }
+  catch (e) { $('#users').innerHTML = `<div class="empty err">${esc(e.message)}</div>`; return; }
+  renderUsers();
+  if (state.sel) { const u = state.users.find(u => u.id === state.sel.id); if (u) selectUser(u, true); }
+}
+
+function renderUsers() {
+  const q = $('#q').value.trim().toLowerCase();
+  const list = state.users.filter(u => !q || (u.phone + ' ' + (u.memo || '')).toLowerCase().includes(q));
+  $('#users').innerHTML = list.length ? list.map(u => `
+    <div class="user ${state.sel && state.sel.id === u.id ? 'on' : ''}" data-id="${u.id}">
+      <div class="row1"><span class="phone">${esc(u.phone)}</span>${badge(u)}</div>
+      <div class="sub">${esc(u.memo || '')}${u.memo ? ' · ' : ''}~${fmtDate(u.expires_at)} · 동기화 ${u.last_sync_at ? fmtDate(u.last_sync_at) : '없음'}</div>
+    </div>`).join('') : '<div class="empty">사용자가 없습니다.</div>';
+}
+function badge(u) { return u.status === 'active' ? '<span class="badge">사용 중</span>' : '<span class="badge off">종료</span>'; }
+
+async function selectUser(u, keep) {
+  state.sel = u;
+  if (!keep) { state.day = null; state.month = null; }
+  renderUsers();
+  renderDetail();
+  try { state.days = (await api(`/users/${u.id}/days`)).days; }
+  catch (e) { state.days = []; toast(e.message); }
+  if (!state.month) { const d = state.days[0] ? new Date(state.days[0].date + 'T00:00') : new Date(); state.month = new Date(d.getFullYear(), d.getMonth(), 1); }
+  renderDetail();
+}
+
+function renderDetail() {
+  const u = state.sel;
+  if (!u) return;
+  const ls = u.last_sync || {};
+  $('#detail').innerHTML = `
+    <div class="card">
+      <div class="head"><h2>${esc(u.phone)}</h2>${badge(u)}<span class="memo">${esc(u.memo || '')}</span></div>
+      <div class="facts">
+        <div class="fact"><div class="k">코드</div><div class="v inline">${u.code ? `<span class="code">${esc(u.code)}</span><button class="btn small" data-copy="${esc(u.code)}">복사</button>` : `<span class="code">····${esc(u.code_hint || '')}</span>`}</div></div>
+        <div class="fact"><div class="k">종료 시점</div><div class="v inline">${fmtTime(u.expires_at)}
+          <button class="btn small" id="extendBtn">변경</button>${u.status === 'active' ? '<button class="btn small danger" id="endNow">지금 종료</button>' : ''}</div></div>
+        <div class="fact"><div class="k">처음 연결 / 마지막 확인</div><div class="v">${fmtTime(u.activated_at)} / ${fmtTime(u.last_seen_at)}</div></div>
+        <div class="fact"><div class="k">마지막 동기화</div><div class="v">${fmtTime(u.last_sync_at)}${ls.slices != null ? ` · ${ls.slices}개 조각` : ''}</div></div>
+        <div class="fact"><div class="k">쌓인 기록</div><div class="v">${u.days_count}일 · 세션 ${u.sessions_total} · 저장 ${size(u.bytes_total)}</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="toolbar">
+        <h3>대화 기록</h3>
+        <div class="seg"><button data-view="calendar" class="${state.view === 'calendar' ? 'on' : ''}">달력</button><button data-view="list" class="${state.view === 'list' ? 'on' : ''}">목록</button></div>
+        <div class="range"><input type="date" id="from"><span>~</span><input type="date" id="to"><button class="btn small" id="rangeDl">기간 다운로드</button></div>
+      </div>
+      <div id="dates">${state.days.length ? (state.view === 'calendar' ? calendarHtml() : `<div class="tablewrap">${listHtml()}</div>`) : '<div class="empty">아직 올라온 대화가 없습니다.</div>'}</div>
+    </div>
+    <div id="dayPanel"></div>`;
+  if (state.days.length) { $('#from').value = state.days[state.days.length - 1].date; $('#to').value = state.days[0].date; }
+  if (state.day) loadDay(state.day);
+}
+
+function heat(n, max) { if (!n) return ''; const r = n / max; return r > .75 ? 'h4' : r > .5 ? 'h3' : r > .25 ? 'h2' : 'h1'; }
+
+function calendarHtml() {
+  const m = state.month, byDate = Object.fromEntries(state.days.map(d => [d.date, d]));
+  const max = Math.max(1, ...state.days.map(d => d.sessions));
+  const first = new Date(m.getFullYear(), m.getMonth(), 1), last = new Date(m.getFullYear(), m.getMonth() + 1, 0);
+  const today = ymd(new Date());
+  let cells = DOW.map(d => `<div class="dow">${d}</div>`).join('');
+  for (let i = 0; i < first.getDay(); i++) cells += '<div class="day out"></div>';
+  for (let d = 1; d <= last.getDate(); d++) {
+    const key = ymd(new Date(m.getFullYear(), m.getMonth(), d)), info = byDate[key];
+    cells += `<div class="day ${info ? 'has ' + heat(info.sessions, max) : ''} ${key === today ? 'today' : ''} ${key === state.day ? 'sel' : ''}" ${info ? `data-day="${key}" title="${key} · 세션 ${info.sessions} · ${size(info.bytes)}"` : ''}>
+      <span class="n">${d}</span>${info ? `<span class="c">${info.sessions}</span>` : ''}</div>`;
+  }
+  const monthTotal = state.days.filter(d => d.date.startsWith(ymd(first).slice(0, 7)));
+  return `<div class="cal-nav"><button class="btn small" data-month="-1">‹</button><span class="month">${m.getFullYear()}년 ${m.getMonth() + 1}월</span><button class="btn small" data-month="1">›</button>
+    <span class="path">이 달 ${monthTotal.length}일 · 세션 ${monthTotal.reduce((a, d) => a + d.sessions, 0)}</span></div><div class="cal">${cells}</div>`;
+}
+
+function listHtml() {
+  return `<table><thead><tr><th>날짜</th><th class="num">세션</th><th class="hide-sm">Claude / Codex</th><th class="num">저장 크기</th><th></th></tr></thead><tbody>${
+    state.days.map(d => `<tr class="click ${d.date === state.day ? 'sel' : ''}" data-day="${d.date}"><td>${d.date} (${DOW[new Date(d.date + 'T00:00').getDay()]})</td><td class="num">${d.sessions}</td>
+      <td class="hide-sm">${d.tools.claude || 0} / ${d.tools.codex || 0}</td><td class="num">${size(d.bytes)}</td><td class="num"><button class="btn small" data-dl="${d.date}">다운로드</button></td></tr>`).join('')}</tbody></table>`;
+}
+
+async function loadDay(day) {
+  state.day = day;
+  document.querySelectorAll('[data-day]').forEach(el => el.classList.toggle(el.tagName === 'TR' ? 'sel' : 'sel', el.dataset.day === day));
+  const panel = $('#dayPanel');
+  panel.innerHTML = `<div class="card"><div class="empty">불러오는 중…</div></div>`;
+  let sessions;
+  try { sessions = (await api(`/users/${state.sel.id}/days/${day}`)).sessions; } catch (e) { panel.innerHTML = `<div class="card err">${esc(e.message)}</div>`; return; }
+  panel.innerHTML = `<div class="card">
+    <div class="toolbar"><h3>${day} (${DOW[new Date(day + 'T00:00').getDay()]}) · 세션 ${sessions.length}</h3><button class="btn primary small" data-dl="${day}">이 날 다운로드</button></div>
+    <div class="tablewrap"><table><thead><tr><th>도구</th><th>시간</th><th>프로젝트 폴더</th><th class="num hide-sm">줄</th><th class="num">저장 크기</th></tr></thead><tbody>${
+      sessions.map(s => `<tr><td><span class="tool">${s.tool === 'claude' ? 'Claude' : 'Codex'}</span></td><td>${hm(s.first)}–${hm(s.last)}</td>
+        <td class="path" title="${esc(s.session_id)}">${esc(s.cwd || '—')}</td><td class="num hide-sm">${s.lines ?? ''}</td><td class="num" title="원본 ${size(s.bytes)}">${size(s.gz_bytes)}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+async function download(from, to) {
+  toast('압축 파일을 만드는 중…');
+  const res = await fetch(`/api/users/${state.sel.id}/download?from=${from}&to=${to}`);
+  if (!res.ok) { const d = await res.json().catch(() => ({})); toast(d.error || '다운로드 실패'); return; }
+  const blob = await res.blob();
+  const name = (res.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || `sessions_${from}.zip`;
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+function presets(container) {
+  const input = container.closest('form').querySelector('input[name=' + container.dataset.target + ']');
+  container.innerHTML = [['1개월', 1], ['3개월', 3], ['6개월', 6], ['1년', 12]].map(([t, m]) => `<button type="button" class="btn small" data-m="${m}">${t}</button>`).join('');
+  container.addEventListener('click', e => { const m = e.target.dataset.m; if (!m) return; const d = new Date(); d.setMonth(d.getMonth() + Number(m)); input.value = ymd(d); });
+}
+document.querySelectorAll('.presets').forEach(presets);
+
+function instructions(u) {
+  return `세션 기록 연동 안내\n\n1) Claude Code 또는 Codex에서 session-relay-init 을 실행하세요.\n2) 코드를 물어보면 아래 코드를 입력하세요.\n\n코드: ${u.code}\n사용 기간: ${fmtDate(u.expires_at)}까지`;
+}
+
+// ----- events -----
+$('#users').addEventListener('click', e => { const el = e.target.closest('.user'); if (el) selectUser(state.users.find(u => u.id === el.dataset.id)); });
+$('#q').addEventListener('input', renderUsers);
+$('#refresh').addEventListener('click', () => loadUsers());
+$('#new').addEventListener('click', () => { $('#issueForm').reset(); $('#issueErr').textContent = ''; const d = new Date(); d.setMonth(d.getMonth() + 3); $('#issueForm').end.value = ymd(d); $('#issue').showModal(); });
+
+$('#issueForm').addEventListener('submit', async e => {
+  if (e.submitter && e.submitter.value === 'cancel') return;
+  e.preventDefault();
+  const f = e.target; $('#issueBtn').disabled = true; $('#issueErr').textContent = '';
+  try {
+    const { user } = await api('/users', { method: 'POST', body: JSON.stringify({ phone: f.phone.value, memo: f.memo.value, expires_at: endOfDay(f.end.value) }) });
+    $('#issue').close();
+    $('#doneCode').textContent = user.code; $('#doneMsg').textContent = instructions(user);
+    $('#done').showModal();
+    state.sel = user; await loadUsers();
+  } catch (err) { $('#issueErr').textContent = err.message; }
+  finally { $('#issueBtn').disabled = false; }
+});
+$('#copyMsg').addEventListener('click', () => { navigator.clipboard.writeText($('#doneMsg').textContent); toast('안내문을 복사했습니다'); });
+$('#closeDone').addEventListener('click', () => $('#done').close());
+
+$('#extendForm').addEventListener('submit', async e => {
+  if (e.submitter && e.submitter.value === 'cancel') return;
+  e.preventDefault();
+  try { await api(`/users/${state.sel.id}`, { method: 'PATCH', body: JSON.stringify({ expires_at: endOfDay(e.target.end.value) }) }); $('#extend').close(); toast('종료일을 바꿨습니다'); loadUsers(); }
+  catch (err) { toast(err.message); }
+});
+
+$('#detail').addEventListener('click', async e => {
+  const t = e.target;
+  if (t.dataset.copy) { navigator.clipboard.writeText(t.dataset.copy); toast('코드를 복사했습니다'); return; }
+  if (t.dataset.view) { state.view = t.dataset.view; localSet('view', state.view); renderDetail(); return; }
+  if (t.dataset.month) { state.month = new Date(state.month.getFullYear(), state.month.getMonth() + Number(t.dataset.month), 1); renderDetail(); return; }
+  if (t.dataset.dl) { download(t.dataset.dl, t.dataset.dl); return; }
+  if (t.id === 'rangeDl') { const a = $('#from').value, b = $('#to').value; if (!a || !b) return toast('기간을 고르세요'); download(a <= b ? a : b, a <= b ? b : a); return; }
+  if (t.id === 'extendBtn') { $('#extendForm').end.value = fmtDate(state.sel.expires_at); $('#extend').showModal(); return; }
+  if (t.id === 'endNow') {
+    if (!confirm(`${state.sel.phone} 의 코드를 지금 종료할까요?\n사용자 컴퓨터는 다음 동기화 때 이를 확인하고 서버 호출을 멈춥니다.`)) return;
+    try { await api(`/users/${state.sel.id}`, { method: 'PATCH', body: JSON.stringify({ expires_at: 'now' }) }); toast('종료했습니다'); loadUsers(); } catch (err) { toast(err.message); }
+    return;
+  }
+  const day = t.closest('[data-day]');
+  if (day) loadDay(day.dataset.day);
+});
+
+loadConfig().then(loadUsers);
+</script>
+</body>
+</html>

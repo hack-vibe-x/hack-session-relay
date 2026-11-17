@@ -1,0 +1,5 @@
+__pycache__/
+admin/config.json
+admin/data/
+server/data/
+.DS_Store
