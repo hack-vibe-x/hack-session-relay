@@ -53,6 +53,7 @@ Installing does the following, in this order:
 |---|---|---|
 | See the status | `~/.session-relay/relay status` | "session relay status" |
 | Send now | `~/.session-relay/relay sync` | "sync now" |
+| Update now | `~/.session-relay/relay update` | "update session relay" |
 | Stop | `~/.session-relay/relay stop` | "stop sending sessions" |
 | Change the code / start again | `~/.session-relay/relay init --code SR-…` | "switch to the new code: SR-…" |
 | Remove | `~/.session-relay/relay uninstall` | "remove session relay" |
@@ -88,6 +89,7 @@ Installed computers update themselves; nobody has to reinstall.
 - Before downloading, the computer asks GitHub whether that commit is on this repository's `main` branch, and refuses it otherwise. GitHub also serves commits pushed to any fork under this repository's address, so without this check whoever holds the server's admin key could release code that never went through `main`.
 - Files must come from this repository at the named commit, that commit must be on `main`, and the files must match the server's hashes. Changing the code on users' computers takes both a push to `main` and the server's admin key.
 - If anything fails (the `main` check, download, hash, test run), it keeps the current version, logs why, syncs as usual, and tries again the next day.
+- To update right away instead of waiting for the daily run, the user runs `~/.session-relay/relay update` (or asks Claude or Codex to "update session relay"). It updates without syncing, and also retries a version that failed earlier that day. Computers with a client older than 0.6.2 do not have this command yet: `relay sync` updates them too, or they run the install line again.
 - Computers installed before 0.6.0 have no updater and need one manual reinstall.
 
 ### Sensitive information
@@ -225,6 +227,7 @@ curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main
 |---|---|---|
 | 상태 보기 | `~/.session-relay/relay status` | "세션 릴레이 상태 알려줘" |
 | 지금 보내기 | `~/.session-relay/relay sync` | "지금 동기화해줘" |
+| 지금 업데이트 | `~/.session-relay/relay update` | "세션 릴레이 업데이트해줘" |
 | 멈추기 | `~/.session-relay/relay stop` | "세션 전송 멈춰줘" |
 | 코드 바꾸기 / 다시 시작 | `~/.session-relay/relay init --code SR-…` | "새 코드로 바꿔줘: SR-…" |
 | 지우기 | `~/.session-relay/relay uninstall` | "세션 릴레이 지워줘" |
@@ -260,6 +263,7 @@ curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main
 - 받기 전에 그 커밋이 이 저장소의 `main` 브랜치에 있는지 GitHub에 묻고, 없으면 거절한다. GitHub는 어느 포크에 올린 커밋이든 이 저장소 주소로도 내준다. 그래서 이 확인이 없으면 서버의 관리자 키를 가진 사람이 `main`을 거치지 않은 코드를 배포할 수 있다.
 - 파일은 이 저장소의 지정된 커밋에서 받아야 하고, 그 커밋은 `main`에 있어야 하며, 서버의 해시와도 맞아야 한다. 사용자 컴퓨터의 코드를 바꾸려면 `main`에 올리는 권한과 서버의 관리자 키가 둘 다 필요하다.
 - `main` 확인, 받기, 해시 대조, 시험 실행 중 하나라도 실패하면 지금 버전을 유지하고 이유를 로그에 남긴다. 동기화는 평소대로 하고, 업데이트는 다음 날 다시 시도한다.
+- 하루 한 번 작업을 기다리지 않고 바로 업데이트하려면 사용자가 `~/.session-relay/relay update`를 실행한다(Claude나 Codex에 "세션 릴레이 업데이트해줘"라고 해도 된다). 동기화 없이 업데이트만 하고, 그날 이미 실패한 버전도 다시 시도한다. 0.6.2보다 오래된 클라이언트에는 이 명령이 아직 없다. 그런 컴퓨터는 `relay sync`로도 업데이트되고, 설치 한 줄을 다시 실행해도 된다.
 - 0.6.0 이전에 설치한 컴퓨터에는 업데이트 기능이 없으므로 한 번은 직접 다시 설치해야 한다.
 
 ### 민감 정보

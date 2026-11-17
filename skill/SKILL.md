@@ -1,6 +1,6 @@
 ---
 name: session-relay
-description: Checks and controls session-relay on this computer, which sends the Claude Code and Codex conversation records to the relay server once a day. Shows the status, syncs now, changes the code, stops it or removes it. Use for "session relay status", "세션 릴레이 상태 알려줘", "동기화 상태", "지금 동기화해줘", "세션 전송 멈춰줘", "새 코드로 바꿔줘", "세션 릴레이 지워줘".
+description: Checks and controls session-relay on this computer, which sends the Claude Code and Codex conversation records to the relay server once a day. Shows the status, syncs now, updates now, changes the code, stops it or removes it. Use for "session relay status", "세션 릴레이 상태 알려줘", "동기화 상태", "지금 동기화해줘", "세션 전송 멈춰줘", "새 코드로 바꿔줘", "세션 릴레이 지워줘", "update session relay", "세션 릴레이 업데이트해줘".
 license: Apache-2.0
 ---
 
@@ -19,6 +19,7 @@ Its messages follow the locale (Korean or English); pass them on in the language
 | stop sending | `~/.session-relay/relay stop` |
 | remove it | `~/.session-relay/relay uninstall` |
 | which version runs here | `~/.session-relay/relay version` |
+| update now / get the latest version | `~/.session-relay/relay update` (installs a newer released client; does not sync) |
 
 If `~/.session-relay/relay` does not exist, it is not installed: see https://github.com/hack-vibe-x/hack-session-relay.
 

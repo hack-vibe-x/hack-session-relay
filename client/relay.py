@@ -7,6 +7,7 @@ Standard library only, Python 3.9+ (the python3 that ships with macOS). Installe
   init --code CODE   Check the code with the server, install, register the daily job and start the first upload.
   tick               What the daily job runs (at login and every hour). Syncs at most once a day.
   sync               Sync now, in the foreground, even if today was already synced.
+  update             Install a newer released client now, without syncing (the daily run does it too).
   status [--json]    Show the state.
   stop               Stop for good on this computer: remove the job and stop calling the server.
   uninstall          stop, then remove ~/.session-relay and the optional skill.
@@ -83,14 +84,17 @@ MESSAGES = {
     "fg": ("지금 업로드합니다.", "Uploading now."),
     "skill": ("Claude Code·Codex용 스킬도 설치했습니다. 대화창에서 \"세션 릴레이 상태 알려줘\"처럼 물어보면 됩니다.",
               "Installed the skill for Claude Code / Codex: ask \"session relay status\" in a chat."),
-    "commands": ("명령: ~/.session-relay/relay status | sync | stop | uninstall",
-                 "Commands: ~/.session-relay/relay status | sync | stop | uninstall"),
+    "commands": ("명령: ~/.session-relay/relay status | sync | update | stop | uninstall",
+                 "Commands: ~/.session-relay/relay status | sync | update | stop | uninstall"),
     "stopped": ("멈췄습니다 ({reason}). 이 컴퓨터는 더 이상 서버를 호출하지 않습니다. {detail}",
                 "Stopped ({reason}). This computer no longer calls the server. {detail}"),
     "ended_at": ("접속 코드가 {end}에 끝났습니다.", "The code ended at {end}."),
     "updated": ("클라이언트를 {old}에서 {new}(으)로 업데이트했습니다.", "Updated the client from {old} to {new}."),
     "update_failed": ("{version} 업데이트에 실패해 지금 버전으로 계속합니다: {e}",
                       "Could not update to {version}; continuing with this version: {e}"),
+    "up_to_date": ("최신 버전입니다 ({version}).", "Up to date ({version})."),
+    "update_not_installed": ("설치된 복사본(~/.session-relay/relay)만 스스로 업데이트할 수 있습니다.",
+                             "Only the installed copy (~/.session-relay/relay) can update itself."),
     "uninstalled": ("삭제했습니다: {paths}", "Removed: {paths}"),
     "reason.expired": ("기간 종료", "ended"),
     "reason.invalid": ("코드 없음", "unknown code"),
@@ -123,7 +127,7 @@ def reason_text(reason):
     key = {"expired": "reason.expired", "invalid": "reason.invalid", "stopped by user": "reason.user"}.get(reason)
     return t(key) if key else reason
 
-VERSION = "0.6.1"
+VERSION = "0.6.2"
 PREFIX = "[session-relay]"
 LABEL = "io.session-relay.sync"
 TIMEOUT = 180
@@ -367,6 +371,7 @@ Commands (also for AI agents asked about "session relay"):
 
     ~/.session-relay/relay status            # user, end date, last sync, errors
     ~/.session-relay/relay sync              # sync now
+    ~/.session-relay/relay update            # install a newer released client now
     ~/.session-relay/relay stop              # stop for good on this computer
     ~/.session-relay/relay init --code SR-…  # change the code, or start again after stop
     ~/.session-relay/relay uninstall         # stop and remove everything here
@@ -629,7 +634,7 @@ def maybe_update(me, reason):
     Any failure keeps the current version: syncing never stops because of an update."""
     info = me.get("client") or {}
     target, ref, files = info.get("version"), info.get("ref"), info.get("files")
-    if reason not in ("daily", "manual") or not (target and ref and isinstance(files, dict)):
+    if reason not in ("daily", "manual", "update") or not (target and ref and isinstance(files, dict)):
         return None
     if version_tuple(target) <= version_tuple(VERSION) or not running_from_app() or env("NO_UPDATE"):
         return None
@@ -637,8 +642,8 @@ def maybe_update(me, reason):
         return None  # Never twice in one run, even if the new code reports an older version.
     state = load_state()
     failed = state.get("update_failed") or {}
-    if failed.get("version") == target and failed.get("date") == today():
-        return None
+    if failed.get("version") == target and failed.get("date") == today() and reason != "update":
+        return None  # The daily run tries a failed version again tomorrow; `relay update` tries now.
     stage = path("app.new")
     try:
         if not UPDATE_REF.match(str(ref)):
@@ -682,8 +687,8 @@ def maybe_update(me, reason):
 
 
 def relaunch(reason, version):
-    """Runs the same command again with the new code, which then syncs."""
-    command = "sync" if reason == "manual" else "tick"
+    """Runs the same command again with the new code, which then syncs (or, for `update`, reports in)."""
+    command = {"manual": "sync", "update": "update"}.get(reason, "tick")
     script = path("app", "relay.py")
     os.environ["SESSION_RELAY_JUST_UPDATED"] = version
     sys.stdout.flush()
@@ -744,6 +749,48 @@ def run_sync(reason):
 
 
 # ---------- Commands ----------
+
+def cmd_update(args):
+    """Updates now, without syncing. Unlike the daily run, it also tries a version that failed earlier today."""
+    cfg = load_config()
+    if not cfg.get("code"):
+        say(t("not_setup"))
+        return 2
+    if env("JUST_UPDATED"):
+        # The new code after `relay update`: ask the server once, which records this version for the admin page.
+        with contextlib.suppress(ServerError, OSError, urllib.error.URLError):
+            check_code(cfg)
+        say(t("up_to_date", version=VERSION))
+        return 0
+    if not running_from_app():
+        say(t("update_not_installed"))
+        return 2
+    updated = None
+    with lock() as got:
+        if not got:
+            say(t("busy"))
+            return 0
+        try:
+            me = check_code(cfg)
+        except ServerError as e:
+            why = ended_reason(e)
+            if why:
+                stop(why, str(e.body.get("error") or ""))
+                return 3
+            say(t("server_retry", e=e))
+            return 1
+        except (OSError, urllib.error.URLError) as e:
+            say(t("net_retry", e=e))
+            return 1
+        target = (me.get("client") or {}).get("version")
+        if not target or version_tuple(target) <= version_tuple(VERSION):
+            say(t("up_to_date", version=VERSION))
+            return 0
+        updated = maybe_update(me, "update")
+        if not updated:
+            return 1  # maybe_update said why.
+    relaunch("update", updated)  # Continues with the new code; does not return.
+
 
 def cmd_init(args):
     server = (args.server or env("SERVER") or load_config().get("server") or defaults().get("server_url") or "").strip()
@@ -898,6 +945,7 @@ def main(argv=None):
     p.add_argument("--no-skill", action="store_true", help="do not install the Claude Code / Codex skill")
     sub.add_parser("tick")
     sub.add_parser("sync")
+    sub.add_parser("update", help="install a newer released client now, without syncing")
     p = sub.add_parser("status")
     p.add_argument("--json", action="store_true")
     sub.add_parser("stop")
@@ -909,8 +957,8 @@ def main(argv=None):
         return 0
     if env("JUST_UPDATED") and running_from_app():
         after_update()
-    commands = {"init": cmd_init, "tick": cmd_tick, "sync": cmd_sync, "status": cmd_status, "stop": cmd_stop,
-                "uninstall": cmd_uninstall}
+    commands = {"init": cmd_init, "tick": cmd_tick, "sync": cmd_sync, "update": cmd_update, "status": cmd_status,
+                "stop": cmd_stop, "uninstall": cmd_uninstall}
     return commands[args.cmd](args)
 
 

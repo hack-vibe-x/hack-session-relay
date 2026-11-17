@@ -255,24 +255,29 @@ class E2E(unittest.TestCase):
         relay_home = self.env["SESSION_RELAY_HOME"]
         wrapper = os.path.join(relay_home, "relay")
         # A release the way GitHub would serve it: <base>/<commit>/<path>.
-        ref = "ab" * 20
         root = os.path.join(self.home, "release")
-        files = {}
-        for rel in ("client/relay.py", "client/sources.py", "client/media.py", "client/redact.py",
-                    "client/defaults.json", "skill/SKILL.md"):
-            with open(os.path.join(ROOT, rel), "rb") as f:
-                data = f.read()
-            if rel == "client/relay.py":
-                data = re.sub(rb'VERSION = "[0-9.]+"', b'VERSION = "9.9.9"', data, count=1)
-            dest = os.path.join(root, ref, rel)
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            with open(dest, "wb") as f:
-                f.write(data)
-            files[rel] = hashlib.sha256(data).hexdigest()
-        # GitHub's compare API, answered the same way: the release is on main; another commit only on a fork.
+
+        def make_release(ref, version):
+            files = {}
+            for rel in ("client/relay.py", "client/sources.py", "client/media.py", "client/redact.py",
+                        "client/defaults.json", "skill/SKILL.md"):
+                with open(os.path.join(ROOT, rel), "rb") as f:
+                    data = f.read()
+                if rel == "client/relay.py":
+                    data = re.sub(rb'VERSION = "[0-9.]+"', b'VERSION = "%s"' % version.encode(), data, count=1)
+                dest = os.path.join(root, ref, rel)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with open(dest, "wb") as f:
+                    f.write(data)
+                files[rel] = hashlib.sha256(data).hexdigest()
+            return files
+
+        ref, ref2 = "ab" * 20, "ef" * 20
+        files, files2 = make_release(ref, "9.9.9"), make_release(ref2, "9.9.10")
+        # GitHub's compare API, answered the same way: the releases are on main; another commit only on a fork.
         fork_ref = "cd" * 20
         os.makedirs(os.path.join(root, "compare"))
-        for r, status in ((ref, "ahead"), (fork_ref, "diverged")):
+        for r, status in ((ref, "ahead"), (ref2, "identical"), (fork_ref, "diverged")):
             with open(os.path.join(root, "compare", r + "...main"), "w") as f:
                 json.dump({"status": status}, f)
         handler = functools.partial(SimpleHTTPRequestHandler, directory=root)
@@ -323,6 +328,25 @@ class E2E(unittest.TestCase):
         # Up to date now: no second update.
         out = run("sync", now="2026-11-19 10:00")
         self.assertNotIn("Updated", out)
+        out = run("update", now="2026-11-19 10:05")
+        self.assertIn("Up to date (9.9.9)", out)
+
+        # `relay update`: a release that failed this morning is not retried by a sync the same day, but update
+        # installs it at once, without syncing, and the server records the new version.
+        call(self.url + "/admin/client", "PUT",
+             {"version": "9.9.10", "ref": ref2, "files": dict(files2, **{"client/media.py": "0" * 64})})
+        self.assertIn("Could not update to 9.9.10", run("sync", now="2026-11-20 09:00"))
+        call(self.url + "/admin/client", "PUT", {"version": "9.9.10", "ref": ref2, "files": files2})
+        out = run("sync", now="2026-11-20 09:30")
+        self.assertNotIn("Updated", out)
+        self.assertEqual(installed_version(), "9.9.9")
+        out = run("update", now="2026-11-20 09:40")
+        self.assertIn("Updated the client from 9.9.9 to 9.9.10", out)
+        self.assertIn("Up to date (9.9.10)", out)
+        self.assertNotIn("Synced", out)
+        self.assertEqual(installed_version(), "9.9.10")
+        users = {u["id"]: u for u in call(self.url + "/admin/users")["users"]}
+        self.assertEqual(users[uid]["client_version"], "9.9.10")
 
     def test_install_needs_code_without_terminal(self):
         rc, out = self.run_install("--server", self.url)
