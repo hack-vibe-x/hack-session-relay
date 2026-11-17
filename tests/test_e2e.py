@@ -269,12 +269,19 @@ class E2E(unittest.TestCase):
             with open(dest, "wb") as f:
                 f.write(data)
             files[rel] = hashlib.sha256(data).hexdigest()
+        # GitHub's compare API, answered the same way: the release is on main; another commit only on a fork.
+        fork_ref = "cd" * 20
+        os.makedirs(os.path.join(root, "compare"))
+        for r, status in ((ref, "ahead"), (fork_ref, "diverged")):
+            with open(os.path.join(root, "compare", r + "...main"), "w") as f:
+                json.dump({"status": status}, f)
         handler = functools.partial(SimpleHTTPRequestHandler, directory=root)
         handler.log_message = lambda *a: None
         static = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         threading.Thread(target=static.serve_forever, daemon=True).start()
         self.addCleanup(static.shutdown)
-        env = dict(self.env, SESSION_RELAY_UPDATE_BASE="http://127.0.0.1:%d/" % static.server_address[1])
+        env = dict(self.env, SESSION_RELAY_UPDATE_BASE="http://127.0.0.1:%d/" % static.server_address[1],
+                   SESSION_RELAY_UPDATE_API="http://127.0.0.1:%d/compare/" % static.server_address[1])
 
         def run(*args, now):
             res = subprocess.run([wrapper] + list(args), env=dict(env, SESSION_RELAY_NOW=utc(now)),
@@ -285,6 +292,14 @@ class E2E(unittest.TestCase):
             return subprocess.run([wrapper, "version"], env=env, capture_output=True, text=True).stdout.strip()
 
         old = installed_version()
+        # A commit that is not on main (pushed to a fork) is refused even with matching hashes.
+        call(self.url + "/admin/client", "PUT", {"version": "9.9.9", "ref": fork_ref, "files": files})
+        out = run("sync", now="2026-11-17 22:00")
+        self.assertIn("Could not update to 9.9.9", out)
+        self.assertIn("is not on main (diverged)", out)
+        self.assertIn("Synced", out)
+        self.assertEqual(installed_version(), old)
+
         # A file that does not match the server's hash: no update, the sync still runs on the old version.
         bad = dict(files, **{"client/media.py": "0" * 64})
         call(self.url + "/admin/client", "PUT", {"version": "9.9.9", "ref": ref, "files": bad})

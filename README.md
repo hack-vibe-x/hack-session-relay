@@ -85,8 +85,9 @@ Installed computers update themselves; nobody has to reinstall.
 
 - The admin releases a version with `scripts/release.py` (see [Releasing a client update](#releasing-a-client-update)). Until then, pushing to GitHub changes nothing on installed computers.
 - At its daily check the computer sees the released version in the server's answer. If it is newer, it downloads that commit's files from this GitHub repository and checks each against the sha256 the server gave. It then runs the new code once as a test, swaps it in (the previous version stays in `~/.session-relay/app.prev`), and syncs with the new code.
-- Files must come from this repository at the named commit and match the server's hashes, so neither GitHub nor the server alone can change the code that runs on users' computers.
-- If anything fails (download, hash, test run), it keeps the current version, logs why, syncs as usual, and tries again the next day.
+- Before downloading, the computer asks GitHub whether that commit is on this repository's `main` branch, and refuses it otherwise. GitHub also serves commits pushed to any fork under this repository's address, so without this check whoever holds the server's admin key could release code that never went through `main`.
+- Files must come from this repository at the named commit, that commit must be on `main`, and the files must match the server's hashes. Changing the code on users' computers takes both a push to `main` and the server's admin key.
+- If anything fails (the `main` check, download, hash, test run), it keeps the current version, logs why, syncs as usual, and tries again the next day.
 - Computers installed before 0.6.0 have no updater and need one manual reinstall.
 
 ### Sensitive information
@@ -163,7 +164,7 @@ python3 tests/test_media.py
 
 - `test_redact.py` checks which secrets are masked and that ordinary code and prose are left alone.
 - `test_media.py` checks that every image shape found in real sessions becomes a note, that the server strips uploads from older clients and cleans stored files, and that `client/media.py` and `server/media.py` are the same.
-- `test_e2e.py` runs a real server process against a fake home folder (fake `~/.claude` and `~/.codex`). It checks: issue → install with `install.sh` → midnight split → resync → resend on request → auto-update (a release with a wrong hash is refused) → ending → zip → admin page → uninstall.
+- `test_e2e.py` runs a real server process against a fake home folder (fake `~/.claude` and `~/.codex`). It checks: issue → install with `install.sh` → midnight split → resync → resend on request → auto-update (a commit not on `main` or a wrong hash is refused) → ending → zip → admin page → uninstall.
 
 ## License
 
@@ -256,8 +257,9 @@ curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main
 
 - 관리자가 `scripts/release.py`로 버전을 내보낸다([클라이언트 업데이트 내보내기](#클라이언트-업데이트-내보내기) 참고). 그 전에는 GitHub에 올려도 설치된 컴퓨터에는 아무 변화가 없다.
 - 하루 한 번 확인할 때 서버의 응답에서 배포된 버전을 본다. 더 새 버전이면 그 커밋의 파일을 이 GitHub 저장소에서 받아, 서버가 준 sha256과 하나씩 대조한다. 그다음 새 코드를 한 번 시험 실행하고, 교체한 뒤(이전 버전은 `~/.session-relay/app.prev`에 남는다) 새 코드로 동기화한다.
-- 파일은 이 저장소의 지정된 커밋에서 받아야 하고 서버의 해시와도 맞아야 한다. 그래서 GitHub나 서버 한쪽만으로는 사용자 컴퓨터에서 도는 코드를 바꿀 수 없다.
-- 받기, 해시 대조, 시험 실행 중 하나라도 실패하면 지금 버전을 유지하고 이유를 로그에 남긴다. 동기화는 평소대로 하고, 업데이트는 다음 날 다시 시도한다.
+- 받기 전에 그 커밋이 이 저장소의 `main` 브랜치에 있는지 GitHub에 묻고, 없으면 거절한다. GitHub는 어느 포크에 올린 커밋이든 이 저장소 주소로도 내준다. 그래서 이 확인이 없으면 서버의 관리자 키를 가진 사람이 `main`을 거치지 않은 코드를 배포할 수 있다.
+- 파일은 이 저장소의 지정된 커밋에서 받아야 하고, 그 커밋은 `main`에 있어야 하며, 서버의 해시와도 맞아야 한다. 사용자 컴퓨터의 코드를 바꾸려면 `main`에 올리는 권한과 서버의 관리자 키가 둘 다 필요하다.
+- `main` 확인, 받기, 해시 대조, 시험 실행 중 하나라도 실패하면 지금 버전을 유지하고 이유를 로그에 남긴다. 동기화는 평소대로 하고, 업데이트는 다음 날 다시 시도한다.
 - 0.6.0 이전에 설치한 컴퓨터에는 업데이트 기능이 없으므로 한 번은 직접 다시 설치해야 한다.
 
 ### 민감 정보
@@ -334,7 +336,7 @@ python3 tests/test_media.py
 
 - `test_redact.py`: 어떤 비밀값이 가려지는지, 평범한 코드와 문장은 그대로 남는지 확인한다.
 - `test_media.py`: 실제 세션에서 찾은 이미지 모양이 모두 표시로 바뀌는지, 서버가 옛 클라이언트의 업로드와 이미 저장된 파일을 정리하는지, `client/media.py`와 `server/media.py`가 같은지 확인한다.
-- `test_e2e.py`: 실제 서버 프로세스와 가짜 홈 폴더(가짜 `~/.claude`, `~/.codex`)로 다음 흐름을 확인한다. 발행 → `install.sh` 설치 → 자정 분할 → 재동기화 → 다시 보내기 요청 → 자동 업데이트(해시가 틀린 배포는 거부) → 종료 → zip → 관리자 웹 → 삭제.
+- `test_e2e.py`: 실제 서버 프로세스와 가짜 홈 폴더(가짜 `~/.claude`, `~/.codex`)로 다음 흐름을 확인한다. 발행 → `install.sh` 설치 → 자정 분할 → 재동기화 → 다시 보내기 요청 → 자동 업데이트(`main`에 없는 커밋이나 해시가 틀린 배포는 거부) → 종료 → zip → 관리자 웹 → 삭제.
 
 ## 라이선스
 

@@ -123,16 +123,19 @@ def reason_text(reason):
     key = {"expired": "reason.expired", "invalid": "reason.invalid", "stopped by user": "reason.user"}.get(reason)
     return t(key) if key else reason
 
-VERSION = "0.6.0"
+VERSION = "0.6.1"
 PREFIX = "[session-relay]"
 LABEL = "io.session-relay.sync"
 TIMEOUT = 180
 MAX_SLICE_GZ = 95 * 1024 * 1024
 SAVE_EVERY = 25
 STALE_LOCK = 6 * 60 * 60
-# Updates come only from this repository, at the commit the server names, and must match the server's sha256 list:
-# neither GitHub nor the server alone can change the code that runs here.
+# Updates come only from this repository, at the commit the server names, and must match the server's sha256 list.
+# The commit must also be on this repository's main branch, asked of GitHub itself: GitHub serves a commit pushed to
+# any fork under this repository's address too, so without this check whoever holds the server's admin key could
+# release code that never went through main.
 UPDATE_BASE = "https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/"
+UPDATE_API = "https://api.github.com/repos/hack-vibe-x/hack-session-relay/compare/"
 UPDATE_FILE = re.compile(r"^(client/[a-z_]+\.(?:py|json)|skill/SKILL\.md)$")
 UPDATE_REF = re.compile(r"^[0-9a-f]{40}$")
 MAX_UPDATE_FILE = 4 * 1024 * 1024
@@ -606,6 +609,21 @@ def fetch_update_file(ref, rel):
     return data
 
 
+def check_on_main(ref):
+    """Raises unless the commit is main itself or an earlier commit of main (GitHub's compare: ref...main)."""
+    url = (env("UPDATE_API") or UPDATE_API) + ref + "...main?per_page=1"
+    req = urllib.request.Request(url, headers={"User-Agent": "session-relay/" + VERSION,
+                                               "Accept": "application/vnd.github+json"})
+    ctx = ssl_context() if url.startswith("https") else None
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT, context=ctx) as res:
+            status = json.loads(res.read(MAX_UPDATE_FILE)).get("status")
+    except urllib.error.HTTPError as e:
+        raise ValueError("GitHub does not know commit %s on main (HTTP %s)" % (ref[:12], e.code))
+    if status not in ("ahead", "identical"):
+        raise ValueError("commit %s is not on main (%s)" % (ref[:12], status))
+
+
 def maybe_update(me, reason):
     """Installs the client the server names when it is newer. Returns the new version, or None.
     Any failure keeps the current version: syncing never stops because of an update."""
@@ -625,6 +643,7 @@ def maybe_update(me, reason):
     try:
         if not UPDATE_REF.match(str(ref)):
             raise ValueError("bad ref %r" % ref)
+        check_on_main(ref)
         shutil.rmtree(stage, ignore_errors=True)
         for rel, digest in sorted(files.items()):
             if not UPDATE_FILE.match(rel):
