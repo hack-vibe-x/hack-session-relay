@@ -15,7 +15,8 @@ Client API (Authorization: Bearer <code>):
 Admin API (Authorization: Bearer <ADMIN_KEY>):
   GET   /admin/users                          every user with totals
   POST  /admin/users {phone, expires_at, memo}   issue a code; the code is only in this response
-  PATCH /admin/users/<id> {expires_at, memo}  change the end time ("now" ends it now)
+  PATCH /admin/users/<id> {expires_at, memo, resend}  change the end time ("now" ends it now); resend: true asks
+                                              the user's computer to send everything again at its next sync
   GET   /admin/users/<id>/days                dates with uploads
   GET   /admin/users/<id>/days/<date>         sessions of one date
   GET   /admin/users/<id>/download?from=&to=  zip of the dates in the range (one date: from=to)
@@ -24,6 +25,7 @@ import datetime
 import gzip
 import hashlib
 import hmac
+import io
 import json
 import os
 import re
@@ -36,6 +38,8 @@ import time
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
+
+import media
 
 DATA_DIR = os.environ.get("DATA_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "./data"
 ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
@@ -51,6 +55,7 @@ USER_ID = re.compile(r"^u_[0-9a-f]{10}$")
 TOOLS = ("claude", "codex")
 
 _lock = threading.Lock()
+_files_lock = threading.Lock()  # Uploads and the image cleanup never write the same session file at once.
 _failures = {}  # ip -> [count, first time]; slows down guessing codes.
 
 
@@ -261,8 +266,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not users[uid].get("activated_at"):
                     users[uid]["activated_at"] = iso(now())
                 save_users(users)
+            # epoch: raised when the server lost or dropped this user's files; clients then send everything again.
             return self.send_json(200, {"status": "active", "user_id": uid, "phone_hint": phone_hint(user["phone"]),
-                                        "expires_at": user.get("expires_at"), "server_time": iso(now())})
+                                        "expires_at": user.get("expires_at"), "epoch": user.get("epoch", 1),
+                                        "server_time": iso(now())})
 
         if method == "PUT" and len(parts) == 4 and parts[0] == "sessions":
             _, day, tool, sid = parts
@@ -280,11 +287,20 @@ class Handler(BaseHTTPRequestHandler):
                 meta = json.loads(self.headers.get("X-Relay-Meta") or "{}")
             except ValueError:
                 meta = {}
+            meta = {k: meta.get(k) for k in ("cwd", "lines", "first", "last", "sha256", "bytes", "media_removed",
+                                             "media_stripped", "secrets_redacted", "redacted")}
+            if meta.get("media_stripped") != media.VERSION:
+                # An older client: replace images here.
+                try:
+                    body, raw_bytes, removed = strip_gz(body)
+                except (OSError, EOFError, ValueError):
+                    raise ValueError("body is not valid gzip")
+                meta.update({"bytes": raw_bytes, "media_removed": removed, "media_stripped": media.VERSION})
             folder = os.path.join(user_dir(uid), day)
-            write_atomic(os.path.join(folder, "%s_%s.jsonl.gz" % (tool, sid)), body)
-            meta = {k: meta.get(k) for k in ("cwd", "lines", "first", "last", "sha256", "bytes")}
             meta.update({"tool": tool, "session_id": sid, "uploaded_at": iso(now()), "gz_bytes": len(body)})
-            write_atomic(os.path.join(folder, "%s_%s.meta.json" % (tool, sid)), json.dumps(meta).encode())
+            with _files_lock:
+                write_atomic(os.path.join(folder, "%s_%s.jsonl.gz" % (tool, sid)), body)
+                write_atomic(os.path.join(folder, "%s_%s.meta.json" % (tool, sid)), json.dumps(meta).encode())
             return self.send_json(200, {"ok": True})
 
         if method == "POST" and parts == ["sync"]:
@@ -344,6 +360,8 @@ class Handler(BaseHTTPRequestHandler):
                         users[uid]["expires_at"] = iso(end)
                     if "memo" in data:
                         users[uid]["memo"] = str(data["memo"])
+                    if data.get("resend"):
+                        users[uid]["epoch"] = users[uid].get("epoch", 1) + 1  # Next sync sends everything again.
                     save_users(users)
                 return self.send_json(200, {"user": public_user(uid, users[uid])})
             if rest == ["days"] and method == "GET":
@@ -408,14 +426,68 @@ def sessions_of(uid, day):
     return out
 
 
+def strip_gz(body):
+    """gzip JSONL -> (gzip JSONL with images replaced by text notes, uncompressed size, images replaced)."""
+    out = io.BytesIO()
+    raw_bytes = removed = 0
+    with gzip.GzipFile(fileobj=io.BytesIO(body)) as src, gzip.GzipFile(fileobj=out, mode="wb", mtime=0) as dst:
+        for line in src:
+            if not line.endswith(b"\n"):
+                line += b"\n"
+            line, n = media.strip_line(line)
+            removed += n
+            raw_bytes += len(line)
+            dst.write(line)
+    return out.getvalue(), raw_bytes, removed
+
+
+def clean_stored_media():
+    """Once per file: replace images in files uploaded before the server did it. Runs in the background."""
+    base = os.path.join(DATA_DIR, "users")
+    done = saved = 0
+    for root, _dirs, names in os.walk(base):
+        for name in sorted(names):
+            if not name.endswith(".meta.json"):
+                continue
+            meta_path = os.path.join(root, name)
+            data_path = meta_path[:-len(".meta.json")] + ".jsonl.gz"
+            try:
+                with open(meta_path, encoding="utf-8") as f:
+                    meta = json.load(f)
+                if meta.get("media_stripped") == media.VERSION or not os.path.exists(data_path):
+                    continue
+                stamp = os.path.getmtime(data_path)
+                with open(data_path, "rb") as f:
+                    old = f.read()
+                new, raw_bytes, removed = strip_gz(old)
+                meta.update({"bytes": raw_bytes, "media_removed": removed, "media_stripped": media.VERSION,
+                             "gz_bytes": len(new)})
+                with _files_lock:
+                    if os.path.getmtime(data_path) != stamp:
+                        continue  # A new upload arrived meanwhile; it was stripped on the way in.
+                    write_atomic(data_path, new)
+                    write_atomic(meta_path, json.dumps(meta).encode())
+                done += 1
+                saved += len(old) - len(new)
+            except Exception as e:  # noqa: BLE001 — one bad file must not stop the rest.
+                sys.stderr.write("media cleanup skipped %s: %r\n" % (data_path, e))
+    if done:
+        sys.stderr.write("media cleanup: %d files, %.1f MB saved\n" % (done, saved / 1e6))
+
+
 def main():
     if not ADMIN_KEY:
         sys.stderr.write("warning: ADMIN_KEY is not set; the admin API is closed.\n")
-    if os.environ.get("RAILWAY_ENVIRONMENT") and not (os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or os.environ.get("DATA_DIR")):
-        sys.stderr.write("warning: no Railway volume attached; uploads are lost on every deploy.\n")
+    if os.environ.get("RAILWAY_ENVIRONMENT") and not os.path.ismount(DATA_DIR):
+        # Without the volume actually mounted, /data is the container's own disk and every deploy wipes it.
+        # This happened once: the first container started before the new volume was attached. Refuse to run.
+        sys.stderr.write("error: %s is not a mounted volume; refusing to start so nothing is written to the "
+                         "container's temporary disk. Attach the volume and deploy again.\n" % DATA_DIR)
+        sys.exit(1)
     os.makedirs(DATA_DIR, exist_ok=True)
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     httpd.daemon_threads = True
+    threading.Thread(target=clean_stored_media, daemon=True).start()
     sys.stderr.write("session-relay server on %s:%d, data in %s\n" % (HOST, PORT, os.path.abspath(DATA_DIR)))
     httpd.serve_forever()
 
