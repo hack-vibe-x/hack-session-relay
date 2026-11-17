@@ -18,7 +18,7 @@ Admin API (Authorization: Bearer <ADMIN_KEY>):
   PATCH /admin/users/<id> {expires_at, memo, resend}  change the end time ("now" ends it now); resend: true asks
                                               the user's computer to send everything again at its next sync
   GET   /admin/users/<id>/days                dates with uploads
-  GET   /admin/users/<id>/days/<date>         sessions of one date
+  GET   /admin/users/<id>/days/<date>         sessions of one date, each with "dates": every date it appears on
   GET   /admin/users/<id>/download?from=&to=  zip of the dates in the range (one date: from=to)
   GET   /admin/client                         the client release offered to computers
   PUT   /admin/client {version, ref, files}   offer a release: version, a 40-hex commit of the GitHub repository
@@ -453,13 +453,18 @@ def sessions_of(uid, day):
         names = sorted(os.listdir(base))
     except FileNotFoundError:
         return out
+    # Every date folder of this user, to show on which days the same session also appears.
+    all_days = sorted(d for d in os.listdir(user_dir(uid)) if DATE.match(d))
     for name in names:
         if name.endswith(".meta.json"):
             try:
                 with open(os.path.join(base, name), encoding="utf-8") as f:
-                    out.append(json.load(f))
+                    meta = json.load(f)
             except (OSError, ValueError):
-                pass
+                continue
+            data_name = name[:-len(".meta.json")] + ".jsonl.gz"
+            meta["dates"] = [d for d in all_days if os.path.exists(os.path.join(user_dir(uid), d, data_name))]
+            out.append(meta)
     out.sort(key=lambda m: m.get("first") or "")
     return out
 
