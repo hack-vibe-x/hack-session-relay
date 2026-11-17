@@ -87,10 +87,15 @@ tr.click { cursor: pointer; } tr.click:hover td { background: var(--bg); } tr.se
 td.num, th.num { text-align: right; }
 .tool { font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); }
 .path { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted); }
+.sid { font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: nowrap; }
+.also { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.also button { border: 1px solid var(--line); background: var(--panel); border-radius: 99px; padding: 0 7px; font-size: 11px; cursor: pointer; color: var(--accent); font-variant-numeric: tabular-nums; }
+.also button:hover { border-color: var(--accent); }
+tr.focus td { background: var(--accent-soft); }
 dialog { border: 1px solid var(--line); border-radius: 14px; padding: 0; width: min(560px, calc(100vw - 32px)); background: var(--panel); color: var(--ink); }
 dialog::backdrop { background: rgba(0,0,0,.35); }
 dialog form, dialog .body { padding: 20px 22px; display: grid; gap: 12px; }
-dialog h3 { margin: 0; font-size: 16px; }
+dialog h2 { margin: 0; font-size: 16px; }
 label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
 .presets { display: flex; gap: 6px; flex-wrap: wrap; }
 .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
@@ -134,7 +139,7 @@ label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
 
 <dialog id="issue">
   <form method="dialog" id="issueForm">
-    <h3>새 코드 발행</h3>
+    <h2>새 코드 발행</h2>
     <label>전화번호<input type="tel" name="phone" placeholder="010-1234-5678" required></label>
     <label>메모 (선택)<input type="text" name="memo" placeholder="소속, 이름 등"></label>
     <label>종료일 (이 날 23:59까지 사용)<input type="date" name="end" required></label>
@@ -146,7 +151,7 @@ label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
 
 <dialog id="done">
   <div class="body">
-    <h3>코드가 발행되었습니다</h3>
+    <h2>코드가 발행되었습니다</h2>
     <div class="issued code" id="doneCode"></div>
     <div class="msg" id="doneMsg"></div>
     <div class="actions"><button class="btn" id="copyMsg">안내문 복사</button><button class="btn primary" id="closeDone">닫기</button></div>
@@ -155,7 +160,7 @@ label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
 
 <dialog id="extend">
   <form method="dialog" id="extendForm">
-    <h3>종료일 변경</h3>
+    <h2>종료일 변경</h2>
     <label>새 종료일 (이 날 23:59까지)<input type="date" name="end" required></label>
     <div class="presets" data-target="end"></div>
     <div class="actions"><button class="btn" value="cancel" formnovalidate>취소</button><button class="btn primary" value="ok">저장</button></div>
@@ -198,11 +203,34 @@ async function loadConfig() {
   }
 }
 
+// What is on screen (user, month, day, search) lives in the address (#u=...&m=...&d=...&q=...), so a reload or a
+// bookmark opens the same view. replaceState: moving around does not fill the back button's history.
+function saveView() {
+  const p = new URLSearchParams();
+  if (state.sel) p.set('u', state.sel.id);
+  if (state.sel && state.month) p.set('m', ymd(state.month).slice(0, 7));
+  if (state.sel && state.day) p.set('d', state.day);
+  const q = $('#q').value.trim();
+  if (q) p.set('q', q);
+  const h = p.toString();
+  history.replaceState(null, '', h ? '#' + h : location.pathname + location.search);
+}
+function restoreView() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  if (p.get('q')) $('#q').value = p.get('q');
+  if (!p.get('u')) return;
+  state.sel = { id: p.get('u') };
+  const m = /^(\d{4})-(\d{2})$/.exec(p.get('m') || '');
+  if (m) state.month = new Date(Number(m[1]), Number(m[2]) - 1, 1);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(p.get('d') || '')) state.day = p.get('d');
+}
+
 async function loadUsers() {
   try { state.users = (await api('/users')).users; }
   catch (e) { $('#users').innerHTML = `<div class="empty err">${esc(e.message)}</div>`; return; }
+  if (state.sel && !state.users.some(u => u.id === state.sel.id)) { state.sel = null; state.day = null; state.month = null; saveView(); }
   renderUsers();
-  if (state.sel) { const u = state.users.find(u => u.id === state.sel.id); if (u) selectUser(u, true); }
+  if (state.sel) selectUser(state.users.find(u => u.id === state.sel.id), true);
 }
 
 function renderUsers() {
@@ -219,11 +247,13 @@ function badge(u) { return u.status === 'active' ? '<span class="badge">사용 �
 async function selectUser(u, keep) {
   state.sel = u;
   if (!keep) { state.day = null; state.month = null; }
+  saveView();
   renderUsers();
   renderDetail();
   try { state.days = (await api(`/users/${u.id}/days`)).days; }
   catch (e) { state.days = []; toast(e.message); }
   if (!state.month) { const d = state.days[0] ? new Date(state.days[0].date + 'T00:00') : new Date(); state.month = new Date(d.getFullYear(), d.getMonth(), 1); }
+  saveView();
   renderDetail();
 }
 
@@ -284,6 +314,7 @@ function listHtml() {
 
 async function loadDay(day) {
   state.day = day;
+  saveView();
   document.querySelectorAll('[data-day]').forEach(el => el.classList.toggle(el.tagName === 'TR' ? 'sel' : 'sel', el.dataset.day === day));
   const panel = $('#dayPanel');
   panel.innerHTML = `<div class="card"><div class="empty">불러오는 중…</div></div>`;
@@ -291,9 +322,21 @@ async function loadDay(day) {
   try { sessions = (await api(`/users/${state.sel.id}/days/${day}`)).sessions; } catch (e) { panel.innerHTML = `<div class="card err">${esc(e.message)}</div>`; return; }
   panel.innerHTML = `<div class="card">
     <div class="toolbar"><h3>${day} (${DOW[new Date(day + 'T00:00').getDay()]}) · 세션 ${sessions.length}</h3><button class="btn primary small" data-dl="${day}">이 날 다운로드</button></div>
-    <div class="tablewrap"><table><thead><tr><th>도구</th><th>시간</th><th>프로젝트 폴더</th><th class="num hide-sm">줄</th><th class="num">저장 크기</th></tr></thead><tbody>${
-      sessions.map(s => `<tr><td><span class="tool">${s.tool === 'claude' ? 'Claude' : 'Codex'}</span></td><td>${hm(s.first)}–${hm(s.last)}</td>
-        <td class="path" title="${esc(s.session_id)}">${esc(s.cwd || '—')}</td><td class="num hide-sm">${s.lines ?? ''}</td><td class="num" title="원본 ${size(s.bytes)}">${size(s.gz_bytes)}</td></tr>`).join('')}</tbody></table></div></div>`;
+    <div class="tablewrap"><table><thead><tr><th>도구</th><th>세션</th><th>시간</th><th>프로젝트 폴더</th><th class="num hide-sm">줄</th><th class="num">저장 크기</th></tr></thead><tbody>${
+      sessions.map(s => {
+        const key = s.tool + '_' + s.session_id;
+        const others = (s.dates || []).filter(d => d !== day);
+        return `<tr data-sid="${esc(key)}"><td><span class="tool">${s.tool === 'claude' ? 'Claude' : 'Codex'}</span></td>
+        <td><span class="sid" title="${esc(s.session_id)}">${esc(String(s.session_id).slice(0, 8))}</span>${others.length ? `<div class="also" title="같은 세션을 쓴 다른 날">${
+          others.map(d => `<button data-goto="${d}" data-sid="${esc(key)}">${d.slice(5).replace('-', '/')}</button>`).join('')}</div>` : ''}</td>
+        <td>${hm(s.first)}–${hm(s.last)}</td>
+        <td class="path">${esc(s.cwd || '—')}</td><td class="num hide-sm">${s.lines ?? ''}</td><td class="num" title="원본 ${size(s.bytes)}">${size(s.gz_bytes)}</td></tr>`;
+      }).join('')}</tbody></table></div></div>`;
+  if (state.focus) {
+    const row = panel.querySelector(`tr[data-sid="${CSS.escape(state.focus)}"]`);
+    if (row) { row.classList.add('focus'); row.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    state.focus = null;
+  }
 }
 
 async function download(from, to) {
@@ -332,7 +375,7 @@ function instructions(u) {
 
 // ----- events -----
 $('#users').addEventListener('click', e => { const el = e.target.closest('.user'); if (el) selectUser(state.users.find(u => u.id === el.dataset.id)); });
-$('#q').addEventListener('input', renderUsers);
+$('#q').addEventListener('input', () => { renderUsers(); saveView(); });
 $('#refresh').addEventListener('click', () => loadUsers());
 $('#new').addEventListener('click', () => { $('#issueForm').reset(); $('#issueErr').textContent = ''; const d = new Date(); d.setMonth(d.getMonth() + 3); $('#issueForm').end.value = ymd(d); $('#issue').showModal(); });
 
@@ -364,7 +407,7 @@ $('#detail').addEventListener('click', async e => {
   if (t.dataset.guide) { navigator.clipboard.writeText(instructions(state.sel)); toast('안내문을 복사했습니다'); return; }
   if (t.dataset.copy) { navigator.clipboard.writeText(t.dataset.copy); toast('코드를 복사했습니다'); return; }
   if (t.dataset.view) { state.view = t.dataset.view; localSet('view', state.view); renderDetail(); return; }
-  if (t.dataset.month) { state.month = new Date(state.month.getFullYear(), state.month.getMonth() + Number(t.dataset.month), 1); renderDetail(); return; }
+  if (t.dataset.month) { state.month = new Date(state.month.getFullYear(), state.month.getMonth() + Number(t.dataset.month), 1); saveView(); renderDetail(); return; }
   if (t.dataset.dl) { download(t.dataset.dl, t.dataset.dl); return; }
   if (t.id === 'rangeDl') { const a = $('#from').value, b = $('#to').value; if (!a || !b) return toast('기간을 고르세요'); download(a <= b ? a : b, a <= b ? b : a); return; }
   if (t.id === 'extendBtn') { $('#extendForm').end.value = fmtDate(state.sel.expires_at); $('#extend').showModal(); return; }
@@ -373,10 +416,19 @@ $('#detail').addEventListener('click', async e => {
     try { await api(`/users/${state.sel.id}`, { method: 'PATCH', body: JSON.stringify({ expires_at: 'now' }) }); toast('종료했습니다'); loadUsers(); } catch (err) { toast(err.message); }
     return;
   }
+  if (t.dataset.goto) {
+    // Same session on another day: open that day (and its month) and highlight the session there.
+    const d = t.dataset.goto;
+    state.day = d; state.focus = t.dataset.sid;
+    state.month = new Date(Number(d.slice(0, 4)), Number(d.slice(5, 7)) - 1, 1);
+    renderDetail();
+    return;
+  }
   const day = t.closest('[data-day]');
   if (day) loadDay(day.dataset.day);
 });
 
+restoreView();
 loadConfig().then(loadUsers);
 </script>
 </body>
