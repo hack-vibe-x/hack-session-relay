@@ -1,7 +1,7 @@
 #!/bin/sh
 # session-relay installer: one line, from a terminal or run by an AI agent.
 #
-#   curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main/install.sh | sh -s -- SR-XXXX-XXXX-XXXX-XXXX
+#   curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main/install.sh | sh -s SR-XXXX-XXXX-XXXX-XXXX
 #   sh install.sh --code SR-XXXX-XXXX-XXXX-XXXX        (from a clone of the repository)
 #
 # Without a code it asks for one when a terminal is attached; an AI agent must pass --code.
@@ -26,6 +26,8 @@ while [ $# -gt 0 ]; do
     --code) CODE="${2:-}"; shift; [ $# -gt 0 ] && shift ;;
     --code=*) CODE="${1#--code=}"; shift ;;
     SR-*|sr-*) CODE="$1"; shift ;;
+    # A chat app may turn the "--" in the copied one-liner into a dash; skip it.
+    --|—|–|―) shift ;;
     *) PASS="$PASS $1"; shift ;;
   esac
 done

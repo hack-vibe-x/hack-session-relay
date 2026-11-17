@@ -15,9 +15,9 @@ When a user asks you (Claude Code, Codex or another agent) to install this repos
    - After the end date it stops by itself.
 
    If the user already pasted a message containing the code, use that code and do not ask again.
-2. Run this (no clone needed; it does not wait for input when `--code` is given):
+2. Run this (no clone needed; it does not wait for input when a code is given):
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main/install.sh | sh -s -- --code <CODE>
+   curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main/install.sh | sh -s <CODE>
    ```
    From a clone, `sh install.sh --code <CODE>` does the same.
 3. Pass the result on to the user.
@@ -35,7 +35,7 @@ When the admin issues a code, the admin page writes the message below for the us
 
 **2) One line in a terminal**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main/install.sh | sh -s -- SR-XXXX-XXXX-XXXX-XXXX
+curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main/install.sh | sh -s SR-XXXX-XXXX-XXXX-XXXX
 ```
 Run without a code, it asks for one in the terminal.
 
@@ -133,9 +133,9 @@ Claude Code와 Codex의 대화 기록을 하루 한 번 서버로 모으는 도�
    - 종료일이 지나면 저절로 멈춘다.
 
    사용자가 코드가 든 안내문을 이미 붙여넣었다면 그 코드를 쓰고 다시 묻지 않는다.
-2. 아래 명령을 실행한다. 저장소를 받을 필요가 없고, `--code`가 있으면 입력을 기다리지 않는다.
+2. 아래 명령을 실행한다. 저장소를 받을 필요가 없고, 코드를 주면 입력을 기다리지 않는다.
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main/install.sh | sh -s -- --code <CODE>
+   curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main/install.sh | sh -s <CODE>
    ```
    저장소를 받았다면 `sh install.sh --code <CODE>`로도 된다.
 3. 결과를 사용자에게 전한다.
@@ -153,7 +153,7 @@ Claude Code와 Codex의 대화 기록을 하루 한 번 서버로 모으는 도�
 
 **2) 터미널 한 줄**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main/install.sh | sh -s -- SR-XXXX-XXXX-XXXX-XXXX
+curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main/install.sh | sh -s SR-XXXX-XXXX-XXXX-XXXX
 ```
 코드 없이 실행하면 터미널에서 코드를 물어본다.
 
