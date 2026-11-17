@@ -63,9 +63,9 @@ MESSAGES = {
     "confirmed": ("접속 코드 확인: 사용자 {user}, {end}까지 사용.", "Code confirmed: user {user}, until {end}."),
     "never": ("기한 없음", "no end"),
     "notice": ("이 컴퓨터의 Claude Code·Codex 대화를 지금 서버로 보내고, 이후 하루 한 번 보냅니다. "
-               "API 키·토큰·비밀번호 같은 민감 정보는 이 컴퓨터에서 가린 뒤 보냅니다. 종료일이 지나면 저절로 멈춥니다.",
+               "API 키·토큰·비밀번호와 이메일·전화번호는 이 컴퓨터에서 가린 뒤 보냅니다. 종료일이 지나면 저절로 멈춥니다.",
                "This computer's Claude Code and Codex conversations are sent now, then once a day, until the end date. "
-               "API keys, tokens, passwords and other secrets are masked on this computer before sending."),
+               "API keys, tokens, passwords, email addresses and phone numbers are masked on this computer before sending."),
     "found": ("세션 파일 {n}개를 찾았습니다 (Claude Code {c}, Codex {x}).",
               "Found {n} session files (Claude Code {c}, Codex {x})."),
     "job_ok": ("매일 동기화 작업을 등록했습니다 (로그인할 때, 하루 한 번).", "Registered the daily job (at login, once a day)."),
@@ -115,7 +115,7 @@ def reason_text(reason):
     key = {"expired": "reason.expired", "invalid": "reason.invalid", "stopped by user": "reason.user"}.get(reason)
     return t(key) if key else reason
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 PREFIX = "[session-relay]"
 LABEL = "io.session-relay.sync"
 TIMEOUT = 180

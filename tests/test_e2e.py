@@ -99,7 +99,7 @@ class E2E(unittest.TestCase):
                              "type": "image", "source": {"type": "base64", "media_type": "image/png", "data": PNG}}]}))
             f.write(line(type="api-request", timestamp=utc("2026-11-16 23:41"), body="x" * 5000))  # Dropped.
             f.write(line(type="assistant", timestamp=utc("2026-11-16 23:55"),
-                         message={"content": "hi, OPENAI_API_KEY=" + SECRET}))
+                         message={"content": "hi, OPENAI_API_KEY=" + SECRET + ", call kim@corp.kr or 010-1234-5678"}))
             f.write(line(type="user", timestamp=utc("2026-11-17 00:10"), message={"content": "after midnight"}))
         with open(os.path.join(proj, SID, "subagents", "agent-1.jsonl"), "w") as f:
             f.write(line(type="user", timestamp=utc("2026-11-16 10:00")))
@@ -186,6 +186,7 @@ class E2E(unittest.TestCase):
         self.assertNotIn("A" * 100, day16)
         self.assertIn("OPENAI_API_KEY=[redacted: api key]", day16)  # Secrets are masked before sending.
         self.assertNotIn(SECRET, day16)
+        self.assertIn("call [redacted: email]@corp.kr or [redacted: phone]", day16)  # And personal information.
         self.assertNotIn("unfinished", body)
 
         # The server asks for everything again (it lost the files): the next sync resends all slices.

@@ -12,7 +12,7 @@ When a user asks you (Claude Code, Codex or another agent) to install this repos
 
 1. Tell the user, in their language, what installing does, then ask for their **access code** (it looks like `SR-XXXX-XXXX-XXXX-XXXX` and comes from the admin). Say this:
    - Every Claude Code and Codex conversation on this computer is sent to the session-relay server now, then once a day, until the code's end date.
-   - API keys, tokens, passwords and other secrets in those conversations are masked on this computer before anything is sent.
+   - API keys, tokens, passwords and other secrets, and personal information such as email addresses and phone numbers, are masked on this computer before anything is sent.
    - After the end date it stops by itself.
 
    If the user already pasted a message containing the code, use that code and do not ask again.
@@ -66,7 +66,7 @@ Messages are in Korean when the system language is Korean, otherwise in English.
 - **Sessions across midnight**: every line is filed under the local date of its own time. A session used from the night of the 17th into the early 18th lands in both the 17th and the 18th folders.
 - **No duplicates**: the sha256 of every (session, date) slice is kept in `~/.session-relay/state.json`, and only changed slices are sent again. The server overwrites the same slice. "Today" sent in the morning is replaced the next day by the full day.
 - **Ending**: once the stored end time has passed, it stops without calling the server. It also stops when the server says the code has ended or is unknown. Stopping removes the launchd job too.
-- **Secrets are masked before sending**: see [Sensitive information](#sensitive-information) below.
+- **Secrets and personal information are masked before sending**: see [Sensitive information](#sensitive-information) below.
 - **Not sent**: subagent records, sessions run by `claude -p` and `codex exec`, copies Codex imported from Claude Code, and the `api-request*` and `file-history-snapshot` lines inside a session.
 - **Platforms**: the daily job is registered automatically on macOS only. The client uses only the Python standard library and runs on the python3 that ships with macOS (3.9).
 
@@ -80,8 +80,11 @@ What is masked:
 - Private keys (`-----BEGIN … PRIVATE KEY-----` blocks)
 - Passwords in URLs (`postgres://user:password@host`) and `Authorization: Bearer|Basic` values
 - Values assigned to secret-looking names, such as `API_KEY=…`, `DB_PASSWORD: …`, `"client_secret": "…"` and `auth_token=…`, in `.env` files, configs, code and commands
+- Email addresses: the part before `@` is masked and the domain kept (`[redacted: email]@gmail.com`), so it still shows which organisation was involved. `noreply`, `git@github.com` and `example.com` addresses are left as they are.
+- Phone numbers: Korean ones (`010-1234-5678`, `01012345678`, `+82 10-…`, `02-123-4567`) and international ones written with `+` (`+1 415 555 1234`)
+- Resident registration numbers (`900101-1234567`, with the dash) and card numbers (16 digits, or 15 for Amex, that pass the card checksum)
 
-Masking works by pattern (`client/redact.py`). A secret in an unusual format that matches none of the patterns can still get through. When the patterns are updated, each computer reads its sessions again at the next sync and sends the slices that changed, so the copies on the server are replaced with the newly masked ones.
+Masking works by pattern (`client/redact.py`). A secret in an unusual format that matches none of the patterns can still get through. Names, postal addresses and company or customer names have no fixed form and are not masked; neither are customers' source code or documents that an agent read. When the patterns are updated, each computer reads its sessions again at the next sync and sends the slices that changed, so the copies on the server are replaced with the newly masked ones.
 
 ## Admin
 
@@ -146,7 +149,7 @@ Claude Code와 Codex의 대화 기록을 하루 한 번 서버로 모으는 도�
 
 1. 설치하면 무슨 일이 생기는지 사용자의 언어로 알리고, **접속 코드**를 묻는다. 접속 코드는 관리자가 주며 `SR-XXXX-XXXX-XXXX-XXXX` 모양이다. 알릴 내용은 다음과 같다.
    - 이 컴퓨터의 Claude Code·Codex 대화가 지금 한 번, 그 뒤로 하루 한 번 서버로 전송된다.
-   - 대화 속 API 키·토큰·비밀번호 같은 민감 정보는 이 컴퓨터에서 가린 뒤에 보낸다.
+   - 대화 속 API 키·토큰·비밀번호 같은 비밀값과 이메일·전화번호 같은 개인정보는 이 컴퓨터에서 가린 뒤에 보낸다.
    - 종료일이 지나면 저절로 멈춘다.
 
    사용자가 코드가 든 안내문을 이미 붙여넣었다면 그 코드를 쓰고 다시 묻지 않는다.
@@ -200,7 +203,7 @@ curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main
 - **날짜에 걸친 세션**: 각 줄을 그 줄의 시각(로컬 날짜)으로 나눈다. 17일 밤부터 18일 새벽까지 쓴 세션은 17일과 18일 폴더에 나뉘어 들어간다.
 - **중복 방지**: (세션, 날짜) 조각마다 sha256을 `~/.session-relay/state.json`에 기록하고, 바뀐 조각만 다시 보낸다. 서버는 같은 조각을 덮어쓴다. 아침에 보낸 "오늘" 조각은 다음 날 완성본으로 바뀐다.
 - **종료**: 저장된 종료 시점이 지나면 서버를 부르지 않고 멈춘다. 서버가 종료됐다거나 코드를 모른다고 답해도 멈춘다. 멈출 때 launchd 작업도 지운다.
-- **민감 정보는 가린 뒤 보낸다**: 아래 [민감 정보](#민감-정보)를 보라.
+- **비밀값과 개인정보는 가린 뒤 보낸다**: 아래 [민감 정보](#민감-정보)를 보라.
 - **보내지 않는 것**: 서브에이전트 기록, `claude -p`와 `codex exec`로 실행된 세션, Codex가 Claude Code에서 가져온 복사본, 세션 안의 `api-request*` 줄과 `file-history-snapshot` 줄.
 - **지원 환경**: 매일 작업은 macOS에서만 자동으로 등록된다. 클라이언트는 Python 표준 라이브러리만 쓰고, 맥 기본 python3(3.9)에서 돈다.
 
@@ -214,8 +217,11 @@ curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main
 - 개인 키(`-----BEGIN … PRIVATE KEY-----` 블록)
 - URL 안의 비밀번호(`postgres://user:비밀번호@host`)와 `Authorization: Bearer|Basic` 값
 - 이름이 비밀값처럼 생긴 변수에 넣은 값. `.env`, 설정 파일, 코드, 명령어 속 `API_KEY=…`, `DB_PASSWORD: …`, `"client_secret": "…"`, `auth_token=…` 같은 것
+- 이메일 주소: `@` 앞부분만 가리고 도메인은 남긴다(`[redacted: email]@gmail.com`). 어느 조직과 관련된 대화인지는 알 수 있게 하려는 것이다. `noreply`, `git@github.com`, `example.com` 주소는 그대로 둔다.
+- 전화번호: 한국 번호(`010-1234-5678`, `01012345678`, `+82 10-…`, `02-123-4567`)와 `+`로 시작하는 해외 번호(`+1 415 555 1234`)
+- 주민등록번호(`900101-1234567`처럼 하이픈이 있는 것)와 카드번호(16자리, Amex는 15자리이고 카드번호 검증식을 통과하는 것)
 
-가리기는 패턴으로 찾는다(`client/redact.py`). 어느 패턴에도 맞지 않는 특이한 형식의 비밀값은 걸러지지 않을 수 있다. 패턴이 바뀌면 각 컴퓨터는 다음 동기화 때 세션을 다시 읽어 달라진 조각을 보내고, 서버의 사본은 새로 가린 것으로 바뀐다.
+가리기는 패턴으로 찾는다(`client/redact.py`). 어느 패턴에도 맞지 않는 특이한 형식의 비밀값은 걸러지지 않을 수 있다. 이름, 주소, 회사·고객 이름은 정해진 형식이 없어 가리지 않는다. 에이전트가 읽은 고객의 소스 코드나 문서 내용도 가리지 않는다. 패턴이 바뀌면 각 컴퓨터는 다음 동기화 때 세션을 다시 읽어 달라진 조각을 보내고, 서버의 사본은 새로 가린 것으로 바뀐다.
 
 ## 관리자
 
