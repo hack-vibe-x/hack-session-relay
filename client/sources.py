@@ -27,15 +27,45 @@ def _env(name):
     return os.environ.get("SESSION_RELAY_" + name)
 
 
-def claude_projects_dir():
-    if _env("CLAUDE_DIR"):
-        return os.path.expanduser(_env("CLAUDE_DIR"))
-    base = os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude"
-    return os.path.join(os.path.expanduser(base), "projects")
+def _unique(paths):
+    seen, out = set(), []
+    for p in paths:
+        key = os.path.normcase(os.path.abspath(p))
+        if key not in seen:
+            seen.add(key)
+            out.append(p)
+    return out
 
 
-def codex_home():
-    return os.path.expanduser(_env("CODEX_DIR") or os.environ.get("CODEX_HOME") or "~/.codex")
+def claude_project_dirs():
+    """Every place this computer could keep Claude Code sessions: the folder CLAUDE_CONFIG_DIR names, the default
+    ~/.claude, and the XDG location some versions use. Only the ones that exist matter."""
+    if _env("CLAUDE_DIR"):  # Tests and manual override: exactly this folder.
+        return [os.path.expanduser(_env("CLAUDE_DIR"))]
+    dirs = []
+    if os.environ.get("CLAUDE_CONFIG_DIR"):
+        dirs.append(os.path.join(os.path.expanduser(os.environ["CLAUDE_CONFIG_DIR"]), "projects"))
+    dirs.append(os.path.join(os.path.expanduser("~"), ".claude", "projects"))
+    xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    dirs.append(os.path.join(os.path.expanduser(xdg), "claude", "projects"))
+    return _unique(dirs)
+
+
+def codex_homes():
+    if _env("CODEX_DIR"):
+        return [os.path.expanduser(_env("CODEX_DIR"))]
+    homes = []
+    if os.environ.get("CODEX_HOME"):
+        homes.append(os.path.expanduser(os.environ["CODEX_HOME"]))
+    homes.append(os.path.join(os.path.expanduser("~"), ".codex"))
+    return _unique(homes)
+
+
+def discover():
+    """The folders on this computer that exist and could hold sessions: {"claude": [...], "codex": [...]}.
+    The installer saves this, because the daily job does not get the terminal's environment variables."""
+    return {"claude": [d for d in claude_project_dirs() if os.path.isdir(d)],
+            "codex": [d for d in codex_homes() if os.path.isdir(d)]}
 
 
 def _imported_codex_ids(home):
@@ -53,9 +83,13 @@ def safe_id(text):
     return SAFE_ID.sub("_", text)[:100] or "unknown"
 
 
-def find_session_files():
-    """Every session file on this computer: [{tool, session_id, path}]. Subagent records are not included."""
+def find_session_files(saved=None):
+    """Every session file on this computer: [{tool, session_id, path}]. Subagent records are not included.
+
+    Looks in the places discover() names now plus the ones saved at install time (`saved`, from config.json).
+    """
     found = {}
+    saved = saved or {}
 
     def add(tool, sid, path):
         key = (tool, sid)
@@ -65,19 +99,20 @@ def find_session_files():
             found[key] = {"tool": tool, "session_id": sid, "path": path}
 
     # Claude Code: projects/<project>/<session id>.jsonl. Subagents live one level deeper and are left out.
-    for path in glob.glob(os.path.join(claude_projects_dir(), "*", "*.jsonl")):
-        add("claude", safe_id(os.path.basename(path)[:-len(".jsonl")]), path)
+    for folder in _unique(list(saved.get("claude") or []) + claude_project_dirs()):
+        for path in glob.glob(os.path.join(folder, "*", "*.jsonl")):
+            add("claude", safe_id(os.path.basename(path)[:-len(".jsonl")]), path)
 
-    home = codex_home()
-    imported = _imported_codex_ids(home)
-    paths = glob.glob(os.path.join(home, "sessions", "*", "*", "*", "rollout-*.jsonl"))
-    paths += glob.glob(os.path.join(home, "archived_sessions", "rollout-*.jsonl"))
-    for path in paths:
-        ids = UUID.findall(os.path.basename(path))
-        sid = ids[-1].lower() if ids else os.path.basename(path)[:-len(".jsonl")]
-        if sid in imported:
-            continue
-        add("codex", safe_id(sid), path)
+    for home in _unique(list(saved.get("codex") or []) + codex_homes()):
+        imported = _imported_codex_ids(home)
+        paths = glob.glob(os.path.join(home, "sessions", "*", "*", "*", "rollout-*.jsonl"))
+        paths += glob.glob(os.path.join(home, "archived_sessions", "rollout-*.jsonl"))
+        for path in paths:
+            ids = UUID.findall(os.path.basename(path))
+            sid = ids[-1].lower() if ids else os.path.basename(path)[:-len(".jsonl")]
+            if sid in imported:
+                continue
+            add("codex", safe_id(sid), path)
     return sorted(found.values(), key=lambda f: f["path"])
 
 

@@ -76,6 +76,11 @@ MESSAGES = {
                "API keys, tokens, passwords, email addresses and phone numbers are masked on this computer before sending."),
     "found": ("세션 파일 {n}개를 찾았습니다 (Claude Code {c}, Codex {x}).",
               "Found {n} session files (Claude Code {c}, Codex {x})."),
+    "folders": ("읽는 폴더: {dirs}", "Reading from: {dirs}"),
+    "none_found": ("세션 파일을 찾지 못했습니다. Claude Code나 Codex를 다른 폴더에 설치했거나 WSL 안에서 쓰고 있다면 "
+                   "관리자에게 알려 주세요. 이 컴퓨터에서 찾아본 곳: {dirs}",
+                   "No session files found. If Claude Code or Codex keeps its files elsewhere (or runs inside WSL), tell the "
+                   "admin. Looked in: {dirs}"),
     "job_ok": ("매일 동기화 작업을 등록했습니다 (로그인할 때, 하루 한 번).", "Registered the daily job (at login, once a day)."),
     "job_fail": ("매일 동기화 작업을 등록하지 못했습니다: {e}", "Could not register the daily job: {e}"),
     "job_unsupported": ("매일 동기화는 지금은 macOS와 Windows에서만 자동으로 등록됩니다. 하루 한 번 ~/.session-relay/relay tick 을 실행하세요.",
@@ -700,7 +705,7 @@ def sync(cfg, reason, me=None):
     sent = state.setdefault("slices", {})
     result = {"started_at": now_utc().isoformat(), "reason": reason, "sessions": 0, "slices": 0,
               "bytes": 0, "skipped_automated": 0, "errors": [], "client_version": VERSION}
-    entries = sources.find_session_files()
+    entries = sources.find_session_files(cfg.get("roots"))
     batch = Batch(cfg, state, result)
     try:
         sync_files(entries, files, sent, batch, result)
@@ -996,9 +1001,16 @@ def cmd_init(args):
     end = local_date(cfg["expires_at"]) or t("never")
     say(t("confirmed", user=cfg.get("phone_hint") or cfg["user_id"], end=end))
     say(t("notice"))
-    found = sources.find_session_files()
+    cfg["roots"] = sources.discover()  # The daily job has no terminal environment: remember where the files are now.
+    save_config(cfg)
+    found = sources.find_session_files(cfg["roots"])
     say(t("found", n=len(found), c=sum(1 for f in found if f["tool"] == "claude"),
           x=sum(1 for f in found if f["tool"] == "codex")))
+    folders = cfg["roots"]["claude"] + cfg["roots"]["codex"]
+    if found:
+        say(t("folders", dirs=", ".join(folders)))
+    else:
+        say(t("none_found", dirs=", ".join(sources.claude_project_dirs() + sources.codex_homes())))
     copy_app()
     if not args.no_skill and install_skill():
         say(t("skill"))
@@ -1058,6 +1070,7 @@ def cmd_status(args):
         "sessions_sent": len(state.get("slices") or {}),
         "slices_sent": sum(len(v) for v in (state.get("slices") or {}).values()),
         "data_dir": home(),
+        "roots": cfg.get("roots"),
     }
     try:
         with open(path("logs", "relay.log"), encoding="utf-8") as f:
@@ -1076,6 +1089,8 @@ def cmd_status(args):
         say(t("st.stopped", at=info["stopped"]["at"][:16], reason=reason_text(info["stopped"]["reason"])))
     say(t("st.job", on=t("st.on") if info["job_loaded"] else t("st.off"), running=t("st.running") if info["running"] else ""))
     say(t("st.last", at=(info["last_sync_at"] or "-")[:16], detail=json.dumps(info["last_result"])))
+    if info["roots"]:
+        say(t("folders", dirs=", ".join(info["roots"]["claude"] + info["roots"]["codex"]) or "-"))
     say(t("st.sent", slices=info["slices_sent"], sessions=info["sessions_sent"]))
     for e in info["last_errors"]:
         say(t("st.error", e=e))

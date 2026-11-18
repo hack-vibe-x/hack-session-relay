@@ -11,6 +11,7 @@ from unittest import mock
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "client"))
 import relay  # noqa: E402
+import sources  # noqa: E402
 
 NS = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
 
@@ -102,6 +103,40 @@ class Job(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("Access is denied", msg)
         self.assertNotIn("/Run", [c[0] for c in calls])
+
+
+class Roots(unittest.TestCase):
+    """The daily job has no terminal environment variables; the folders found at install time are saved."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.custom = os.path.join(self.tmp.name, "custom-claude")
+        os.makedirs(os.path.join(self.custom, "projects", "p"))
+        with open(os.path.join(self.custom, "projects", "p", "11111111-2222-3333-4444-555555555555.jsonl"), "w") as f:
+            f.write("{}\n")
+        self.home = os.path.join(self.tmp.name, "home")
+        os.makedirs(self.home)
+
+    def clean_env(self, **extra):
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("SESSION_RELAY_", "CLAUDE_", "CODEX_", "XDG_"))}
+        env.update(HOME=self.home, USERPROFILE=self.home, **extra)
+        return mock.patch.dict(os.environ, env, clear=True)
+
+    def test_discover_sees_the_environment_variable_and_saved_roots_outlive_it(self):
+        with self.clean_env(CLAUDE_CONFIG_DIR=self.custom):
+            roots = sources.discover()
+            self.assertEqual(roots["claude"], [os.path.join(self.custom, "projects")])
+            self.assertEqual(len(sources.find_session_files(roots)), 1)
+        with self.clean_env():  # The job: no CLAUDE_CONFIG_DIR.
+            self.assertEqual(sources.find_session_files(), [])
+            self.assertEqual(len(sources.find_session_files(roots)), 1)
+
+    def test_nothing_found_lists_the_places_looked_in(self):
+        with self.clean_env():
+            self.assertEqual(sources.discover(), {"claude": [], "codex": []})
+            self.assertTrue(all(self.home in d for d in sources.claude_project_dirs() + sources.codex_homes()))
 
 
 class Python(unittest.TestCase):
