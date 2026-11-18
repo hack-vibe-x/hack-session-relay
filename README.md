@@ -21,11 +21,17 @@ When a user asks you (Claude Code, Codex or another agent) to install this repos
    curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main/install.sh | sh -s <CODE>
    ```
    From a clone, `sh install.sh --code <CODE>` does the same.
+
+   **On Windows** (PowerShell), run this instead; it needs Python 3.9 or newer:
+   ```powershell
+   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main/install.ps1))) <CODE>
+   ```
+   From a clone, `.\install.ps1 -Code <CODE>`.
 3. Pass the result on to the user.
    - **Success:** which user it is set up for, the end date, how many session files were found, and that the first upload runs in the background.
    - **"not valid":** ask the user to check the code. Never guess codes.
    - **"already ended":** the user needs a new code from the admin.
-   - **python3 missing:** on macOS, `xcode-select --install`, then run it again.
+   - **python3 missing:** on macOS, `xcode-select --install`, then run it again. On Windows, `winget install Python.Python.3.13`, then open a new PowerShell and run it again.
 4. Later requests ("status", "sync now", "stop", "new code") go to `~/.session-relay/relay status | sync | stop | init --code <CODE> | uninstall`. `~/.session-relay/README.md` lists them.
 
 ## Installing (users)
@@ -40,10 +46,16 @@ curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main
 ```
 Run without a code, it asks for one in the terminal.
 
+**Windows** (PowerShell, Python 3.9+): the same, with the PowerShell installer.
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main/install.ps1))) SR-XXXX-XXXX-XXXX-XXXX
+```
+On Windows the command is `%USERPROFILE%\.session-relay\relay.cmd` wherever this README says `~/.session-relay/relay`.
+
 Installing does the following, in this order:
 1. Checks the code with the server. A wrong or ended code installs nothing.
 2. Copies the program into `~/.session-relay/`.
-3. Registers the daily job. It uses launchd on the Mac and wakes at login and every hour, but calls the server only once a day.
+3. Registers the daily job. It uses launchd on the Mac and Task Scheduler on Windows; it wakes at login and every hour, but calls the server only once a day.
 4. Installs the `session-relay` skill for Claude Code and Codex, so a chat can answer "session relay status". `--no-skill` leaves it out.
 5. Starts the first upload in the background.
 
@@ -74,12 +86,14 @@ Messages are in Korean when the system language is Korean, otherwise in English.
 - **Sessions across midnight**: every line is filed under the local date of its own time. A session used from the night of the 17th into the early 18th lands in both the 17th and the 18th folders.
 - **No duplicates**: the sha256 of every (session, date) slice is kept in `~/.session-relay/state.json`, and only changed slices are sent again. The server overwrites the same slice. "Today" sent in the morning is replaced the next day by the full day.
 - **Few requests**: changed slices go in requests of about 8 MB (`POST /v1/batch`), and the report rides on the last one. A daily sync is two requests (code check, one batch); a first sync of a few hundred slices is a handful. Each slice is accepted or refused on its own, and only accepted slices are recorded as sent.
-- **Ending**: once the stored end time has passed, it stops without calling the server. It also stops when the server says the code has ended or is unknown. Stopping removes the launchd job too.
+- **Ending**: once the stored end time has passed, it stops without calling the server. It also stops when the server says the code has ended or is unknown. Stopping removes the launchd job (Windows: the scheduled task) too.
 - **Secrets and personal information are masked before sending**: see [Sensitive information](#sensitive-information) below.
 - **Images become text**: images and other base64 attachments (screenshots, PDFs) are replaced on the user's computer with a note such as `[image omitted: image/png, 245 KB]`, so they are never uploaded. On one machine this cut the compressed upload by about 80%. The server does the same for uploads from older clients and for files stored before.
 - **Resend on request**: when the server's copy is lost, the admin can raise the user's epoch (`PATCH /admin/users/<id> {"resend": true}`), and the computer sends everything again at its next sync.
 - **Not sent**: subagent records, sessions run by `claude -p` and `codex exec`, copies Codex imported from Claude Code, and the `api-request*` and `file-history-snapshot` lines inside a session.
-- **Platforms**: the daily job is registered automatically on macOS only. The client uses only the Python standard library and runs on the python3 that ships with macOS (3.9).
+- **Platforms**: macOS and Windows. The client uses only the Python standard library and runs on the python3 that ships with macOS (3.9).
+  - **Windows**: the daily job is a scheduled task named `io.session-relay.sync` for the current user (no administrator needed): at logon when Windows allows it, and every hour, running a missed hour when the computer comes back. It runs with `pythonw.exe`, so no console window opens. The command is `relay.cmd`. Check it with `schtasks /Query /TN io.session-relay.sync`. Claude Code and Codex records are read from `%USERPROFILE%\.claude` and `%USERPROFILE%\.codex`; sessions of a Claude Code or Codex that run inside WSL live in the WSL home and are not found.
+  - Linux has no daily job yet: run `relay tick` once a day from cron.
 
 ### Updates
 
@@ -196,11 +210,17 @@ Claude Code와 Codex의 대화 기록을 하루 한 번 서버로 모으는 도�
    curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main/install.sh | sh -s <CODE>
    ```
    저장소를 받았다면 `sh install.sh --code <CODE>`로도 된다.
+
+   **윈도우**(PowerShell)에서는 대신 아래를 실행한다. Python 3.9 이상이 필요하다.
+   ```powershell
+   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main/install.ps1))) <CODE>
+   ```
+   저장소를 받았다면 `.\install.ps1 -Code <CODE>`.
 3. 결과를 사용자에게 전한다.
    - **성공:** 누구로 설정됐는지, 종료일, 찾은 세션 파일 수, 첫 업로드가 백그라운드에서 진행 중이라는 것.
    - **"맞지 않습니다":** 코드를 확인해 달라고 한다. 코드를 추측하지 않는다.
    - **"이미 끝난":** 관리자에게 새 코드를 받아야 한다.
-   - **python3 없음:** macOS에서는 `xcode-select --install` 뒤에 다시 실행한다.
+   - **python3 없음:** macOS에서는 `xcode-select --install` 뒤에 다시 실행한다. 윈도우에서는 `winget install Python.Python.3.13` 뒤에 새 PowerShell 창을 열어 다시 실행한다.
 4. 나중의 요청("상태", "지금 동기화", "멈춰", "새 코드")은 `~/.session-relay/relay status | sync | stop | init --code <CODE> | uninstall`로 처리한다. `~/.session-relay/README.md`에 정리되어 있다.
 
 ## 사용자 설치
@@ -215,10 +235,16 @@ curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main
 ```
 코드 없이 실행하면 터미널에서 코드를 물어본다.
 
+**윈도우**(PowerShell, Python 3.9 이상): 같은 방식이고 설치 파일만 PowerShell용이다.
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main/install.ps1))) SR-XXXX-XXXX-XXXX-XXXX
+```
+윈도우에서 이 문서의 `~/.session-relay/relay`는 `%USERPROFILE%\.session-relay\relay.cmd`다.
+
 설치하면 다음이 이 순서로 일어난다.
 1. 서버에서 코드를 확인한다. 틀리거나 끝난 코드면 아무것도 설치하지 않는다.
 2. `~/.session-relay/`에 프로그램을 복사한다.
-3. 매일 동기화 작업을 등록한다. 맥의 launchd를 쓰고, 로그인할 때와 매시 깨어나되 서버에는 하루 한 번만 접속한다.
+3. 매일 동기화 작업을 등록한다. 맥은 launchd, 윈도우는 작업 스케줄러를 쓰고, 로그인할 때와 매시 깨어나되 서버에는 하루 한 번만 접속한다.
 4. Claude Code·Codex용 스킬 `session-relay`를 설치한다. 대화창에서 "세션 릴레이 상태 알려줘"라고 물을 수 있게 하는 용도이고, `--no-skill`이면 빠진다.
 5. 첫 업로드를 백그라운드에서 시작한다.
 
@@ -249,12 +275,14 @@ curl -fsSL https://raw.githubusercontent.com/hack-vibe-x/hack-session-relay/main
 - **날짜에 걸친 세션**: 각 줄을 그 줄의 시각(로컬 날짜)으로 나눈다. 17일 밤부터 18일 새벽까지 쓴 세션은 17일과 18일 폴더에 나뉘어 들어간다.
 - **중복 방지**: (세션, 날짜) 조각마다 sha256을 `~/.session-relay/state.json`에 기록하고, 바뀐 조각만 다시 보낸다. 서버는 같은 조각을 덮어쓴다. 아침에 보낸 "오늘" 조각은 다음 날 완성본으로 바뀐다.
 - **적은 요청**: 바뀐 조각은 약 8MB씩 묶어 보내고(`POST /v1/batch`), 완료 보고는 마지막 묶음에 붙는다. 매일 동기화는 요청 두 번(코드 확인, 묶음 하나)이고, 조각 수백 개인 첫 동기화도 몇 번이면 끝난다. 조각마다 따로 받아들여지거나 거절되고, 받아들여진 조각만 보낸 것으로 기록한다.
-- **종료**: 저장된 종료 시점이 지나면 서버를 부르지 않고 멈춘다. 서버가 종료됐다거나 코드를 모른다고 답해도 멈춘다. 멈출 때 launchd 작업도 지운다.
+- **종료**: 저장된 종료 시점이 지나면 서버를 부르지 않고 멈춘다. 서버가 종료됐다거나 코드를 모른다고 답해도 멈춘다. 멈출 때 launchd 작업(윈도우는 예약 작업)도 지운다.
 - **비밀값과 개인정보는 가린 뒤 보낸다**: 아래 [민감 정보](#민감-정보)를 보라.
 - **이미지는 글로 바꾼다**: 이미지와 그 밖의 base64 첨부(스크린샷, PDF)는 사용자 컴퓨터에서 `[image omitted: image/png, 245 KB]` 같은 표시로 바뀌어 아예 올라가지 않는다. 한 컴퓨터에서 재 보니 압축 후 업로드가 약 80% 줄었다. 옛 클라이언트가 보낸 업로드와 그 전에 저장된 파일은 서버가 같은 방식으로 바꾼다.
 - **다시 보내기 요청**: 서버의 사본을 잃었을 때 관리자가 그 사용자의 세대 번호(epoch)를 올리면(`PATCH /admin/users/<id> {"resend": true}`), 그 컴퓨터는 다음 동기화 때 전부 다시 보낸다.
 - **보내지 않는 것**: 서브에이전트 기록, `claude -p`와 `codex exec`로 실행된 세션, Codex가 Claude Code에서 가져온 복사본, 세션 안의 `api-request*` 줄과 `file-history-snapshot` 줄.
-- **지원 환경**: 매일 작업은 macOS에서만 자동으로 등록된다. 클라이언트는 Python 표준 라이브러리만 쓰고, 맥 기본 python3(3.9)에서 돈다.
+- **지원 환경**: macOS와 윈도우. 클라이언트는 Python 표준 라이브러리만 쓰고, 맥 기본 python3(3.9)에서 돈다.
+  - **윈도우**: 매일 작업은 현재 사용자의 예약 작업 `io.session-relay.sync`다(관리자 권한 불필요). 윈도우가 허용하면 로그온할 때, 그리고 매시 돌고, 꺼져 있던 시간은 켜질 때 한 번 따라잡는다. `pythonw.exe`로 돌아서 콘솔 창이 뜨지 않는다. 명령은 `relay.cmd`다. 확인: `schtasks /Query /TN io.session-relay.sync`. 대화 기록은 `%USERPROFILE%\.claude`와 `%USERPROFILE%\.codex`에서 읽는다. WSL 안에서 쓰는 Claude Code·Codex의 기록은 WSL 홈에 있어 찾지 못한다.
+  - 리눅스는 아직 매일 작업이 없다. cron으로 하루 한 번 `relay tick`을 실행한다.
 
 ### 업데이트
 

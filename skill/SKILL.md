@@ -23,6 +23,9 @@ Its messages follow the locale (Korean or English); pass them on in the language
 
 If `~/.session-relay/relay` does not exist, it is not installed: see https://github.com/hack-vibe-x/hack-session-relay.
 
+On Windows the command is `relay.cmd` in the same folder (`%USERPROFILE%\.session-relay\relay.cmd`; in PowerShell
+`& "$HOME\.session-relay\relay.cmd" status`), installed with `install.ps1`. The daily job is a scheduled task.
+
 ## Do not
 - Run `stop`, `uninstall` or `sync` unasked. Confirm `stop` and `uninstall` first: sending ends on this computer
   until it is set up again with a valid code.

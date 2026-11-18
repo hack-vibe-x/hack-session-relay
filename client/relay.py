@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """session-relay: sends this computer's Claude Code and Codex conversations to the relay server, once a day.
 
-Standard library only, Python 3.9+ (the python3 that ships with macOS). Installed by install.sh into
-~/.session-relay/app; ~/.session-relay/relay runs it.
+Standard library only, Python 3.9+ (the python3 that ships with macOS). Installed by install.sh (install.ps1 on Windows) into
+~/.session-relay/app; ~/.session-relay/relay runs it (relay.cmd on Windows).
 
   init --code CODE   Check the code with the server, install, register the daily job and start the first upload.
   tick               What the daily job runs (at login and every hour). Syncs at most once a day.
@@ -31,6 +31,7 @@ import gzip
 import hashlib
 import json
 import os
+import platform
 import plistlib
 import re
 import shutil
@@ -42,6 +43,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from xml.sax.saxutils import escape as xml_escape
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import redact  # noqa: E402
@@ -76,8 +78,8 @@ MESSAGES = {
               "Found {n} session files (Claude Code {c}, Codex {x})."),
     "job_ok": ("매일 동기화 작업을 등록했습니다 (로그인할 때, 하루 한 번).", "Registered the daily job (at login, once a day)."),
     "job_fail": ("매일 동기화 작업을 등록하지 못했습니다: {e}", "Could not register the daily job: {e}"),
-    "job_unsupported": ("매일 동기화는 지금은 macOS에서만 자동으로 등록됩니다. 하루 한 번 ~/.session-relay/relay tick 을 실행하세요.",
-                        "The daily job is registered on macOS only for now. Run ~/.session-relay/relay tick once a day."),
+    "job_unsupported": ("매일 동기화는 지금은 macOS와 Windows에서만 자동으로 등록됩니다. 하루 한 번 ~/.session-relay/relay tick 을 실행하세요.",
+                        "The daily job is registered on macOS and Windows only for now. Run ~/.session-relay/relay tick once a day."),
     "no_job": ("매일 동기화 작업은 등록하지 않았습니다 (--no-job).", "No daily job (--no-job)."),
     "bg": ("첫 업로드를 백그라운드에서 시작했습니다. 확인: ~/.session-relay/relay status",
            "The first upload is running in the background. Check it: ~/.session-relay/relay status"),
@@ -111,23 +113,40 @@ MESSAGES = {
 }
 
 
+def windows():
+    return sys.platform == "win32"
+
+
 def korean():
     lang = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
     if env("LANG"):
         lang = env("LANG")
+    if not lang and windows():
+        try:  # Windows sets no LANG: ask for the display language (0x12 = Korean).
+            import ctypes
+            return (ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3FF) == 0x12
+        except Exception:  # noqa: BLE001
+            return False
     return lang.lower().startswith("ko")
+
+
+def localize(text):
+    """Texts name the command as ~/.session-relay/relay. On Windows that is relay.cmd in the real folder."""
+    if not windows():
+        return text
+    return text.replace("~/.session-relay/relay", path("relay.cmd")).replace("~/.session-relay", home())
 
 
 def t(key, **kw):
     text = MESSAGES[key][0 if korean() else 1]
-    return text.format(**kw) if kw else text
+    return localize(text.format(**kw) if kw else text)
 
 
 def reason_text(reason):
     key = {"expired": "reason.expired", "invalid": "reason.invalid", "stopped by user": "reason.user"}.get(reason)
     return t(key) if key else reason
 
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 PREFIX = "[session-relay]"
 LABEL = "io.session-relay.sync"
 TIMEOUT = 180
@@ -297,10 +316,35 @@ def ended_reason(err):
     return None
 
 
-# ---------- Daily job (launchd) ----------
+# ---------- Daily job (launchd on macOS, Task Scheduler on Windows) ----------
+
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # Windows: no console flashing up for a child process.
+
+
+def python_console():
+    """The python that has a console (python.exe). Under pythonw.exe (the scheduled job) that is its sibling."""
+    exe = sys.executable
+    if windows() and os.path.basename(exe).lower() == "pythonw.exe":
+        sibling = os.path.join(os.path.dirname(exe), "python.exe")
+        if os.path.exists(sibling):
+            return sibling
+    return exe
+
+
+def python_background():
+    """What the scheduled job runs: pythonw.exe on Windows, so no console window opens every hour."""
+    exe = python_console()
+    if windows():
+        sibling = os.path.join(os.path.dirname(exe), "pythonw.exe")
+        if os.path.exists(sibling):
+            return sibling
+    return exe
+
 
 def python_path():
     """A python3 path that survives updates. Shell-scoped shims (fnm, pyenv) are resolved."""
+    if windows():
+        return python_console()  # `python3` on Windows is often the Microsoft Store stub.
     found = shutil.which("python3") or sys.executable
     if "_multishells" in found or "/shims/" in found:
         return os.path.realpath(found)
@@ -323,13 +367,26 @@ def copy_app():
             os.makedirs(os.path.join(dest, "skill"))
             shutil.copy2(skill, os.path.join(dest, "skill", "SKILL.md"))
     script = os.path.join(dest, "relay.py")
-    wrapper = path("relay")
-    with open(wrapper, "w", encoding="utf-8") as f:
-        f.write('#!/bin/sh\nexec "%s" "%s" "$@"\n' % (python_path(), script))
-    os.chmod(wrapper, 0o755)
+    if windows():
+        with open(path("relay.cmd"), "w", encoding="ascii", newline="\r\n", errors="replace") as f:
+            f.write(windows_wrapper(python_path()))
+    else:
+        wrapper = path("relay")
+        with open(wrapper, "w", encoding="utf-8") as f:
+            f.write('#!/bin/sh\nexec "%s" "%s" "$@"\n' % (python_path(), script))
+        os.chmod(wrapper, 0o755)
     with open(path("README.md"), "w", encoding="utf-8") as f:
-        f.write(LOCAL_README)
+        f.write(localize(LOCAL_README))
     return script
+
+
+def windows_wrapper(python):
+    """relay.cmd. Batch files are read in the console's code page, so the text stays ASCII: the script is found
+    relative to the file itself, and a home folder with non-ASCII letters (a Korean user name) is written as %USERPROFILE%."""
+    profile = os.environ.get("USERPROFILE") or os.path.expanduser("~")
+    if profile and python.lower().startswith(profile.lower() + os.sep):
+        python = "%USERPROFILE%" + python[len(profile):]
+    return '@echo off\n"%s" "%%~dp0app\\relay.py" %%*\n' % python
 
 
 def skill_source():
@@ -392,18 +449,83 @@ def domain():
     return "gui/%d" % os.getuid()
 
 
+def schtasks(*args):
+    return subprocess.run(["schtasks"] + list(args), capture_output=True, text=True, errors="replace",
+                          creationflags=NO_WINDOW)
+
+
+def job_supported():
+    return not env("NO_LAUNCHD") and (sys.platform == "darwin" or windows())
+
+
 def job_loaded():
-    if sys.platform != "darwin" or env("NO_LAUNCHD"):
+    if not job_supported():
         return False
+    if windows():
+        return schtasks("/Query", "/TN", label()).returncode == 0
     return launchctl("print", "%s/%s" % (domain(), label())).returncode == 0
 
 
-def install_job():
-    """Registers the job: at login (RunAtLoad) and on the hour. The tick itself makes it once a day.
-    Loading it runs it right away, which starts the first upload in the background."""
+def task_xml(command, arguments, user, logon=True):
+    """The Windows scheduled task: at this user's logon (when allowed) and every hour, from the next full hour.
+    The tick itself makes it once a day. StartWhenAvailable runs a missed hour when the computer comes back."""
+    start = (datetime.datetime.now() + datetime.timedelta(hours=1)).replace(minute=7, second=0, microsecond=0)
+    who = xml_escape(user)
+    logon_trigger = ("<LogonTrigger><Enabled>true</Enabled><UserId>%s</UserId></LogonTrigger>" % who) if logon else ""
+    return (
+        '<?xml version="1.0" encoding="UTF-16"?>\n'
+        '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">'
+        "<RegistrationInfo><Description>session-relay: sends Claude Code and Codex conversation records once a day."
+        "</Description></RegistrationInfo>"
+        "<Triggers>%s<TimeTrigger><StartBoundary>%s</StartBoundary><Enabled>true</Enabled>"
+        "<Repetition><Interval>PT1H</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition>"
+        "</TimeTrigger></Triggers>"
+        '<Principals><Principal id="Author"><UserId>%s</UserId><LogonType>InteractiveToken</LogonType>'
+        "<RunLevel>LeastPrivilege</RunLevel></Principal></Principals>"
+        "<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>"
+        "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>"
+        "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable>"
+        "<AllowStartOnDemand>true</AllowStartOnDemand><Enabled>true</Enabled><Hidden>true</Hidden>"
+        "<ExecutionTimeLimit>PT6H</ExecutionTimeLimit></Settings>"
+        '<Actions Context="Author"><Exec><Command>%s</Command><Arguments>%s</Arguments></Exec></Actions>'
+        "</Task>\n" % (logon_trigger, start.strftime("%Y-%m-%dT%H:%M:%S"), who, xml_escape(command),
+                       xml_escape(arguments)))
+
+
+def windows_user():
+    name = os.environ.get("USERNAME") or os.path.basename(os.path.expanduser("~"))
+    domain_name = os.environ.get("USERDOMAIN")
+    return "%s\\%s" % (domain_name, name) if domain_name else name
+
+
+def install_task():
     script = path("app", "relay.py")
-    if sys.platform != "darwin" or env("NO_LAUNCHD"):
+    os.makedirs(path("logs"), exist_ok=True)
+    xml_file = path("task.xml")
+    last = None
+    for logon in (True, False):  # Some PCs only allow a logon trigger to administrators: then hourly alone.
+        with open(xml_file, "w", encoding="utf-16") as f:
+            f.write(task_xml(python_background(), '"%s" tick' % script, windows_user(), logon))
+        last = schtasks("/Create", "/TN", label(), "/XML", xml_file, "/F")
+        if last.returncode == 0:
+            break
+    with contextlib.suppress(OSError):
+        os.unlink(xml_file)
+    if last.returncode != 0:
+        return False, t("job_fail", e=(last.stderr or last.stdout).strip())
+    schtasks("/Run", "/TN", label())  # Like RunAtLoad on the Mac: starts the first upload now, in the background.
+    return True, t("job_ok")
+
+
+def install_job():
+    """Registers the job: at login and every hour. The tick itself makes it once a day.
+    macOS: launchd (loading it runs it right away, which starts the first upload in the background).
+    Windows: a scheduled task, started once right after it is created."""
+    if not job_supported():
         return False, t("job_unsupported")
+    if windows():
+        return install_task()
+    script = path("app", "relay.py")
     os.makedirs(path("logs"), exist_ok=True)
     data = {
         "Label": label(),
@@ -430,7 +552,12 @@ def install_job():
 
 
 def remove_job():
-    """Removes the plist first, then unloads. Unloading kills this process if the job is running it, so it is last."""
+    """macOS: removes the plist first, then unloads. Unloading kills this process if the job is running it, so it is last.
+    Windows: deletes the scheduled task."""
+    if windows():
+        if job_loaded():
+            schtasks("/Delete", "/TN", label(), "/F")
+        return
     try:
         os.unlink(plist_path())
     except OSError:
@@ -706,8 +833,9 @@ def maybe_update(me, reason):
         for name in ("relay.py", "sources.py"):
             if not os.path.exists(os.path.join(stage, name)):
                 raise ValueError("%s missing from the update" % name)
-        check = subprocess.run([sys.executable, os.path.join(stage, "relay.py"), "version"], capture_output=True,
-                               text=True, timeout=120, env=dict(os.environ, SESSION_RELAY_NO_UPDATE="1"))
+        check = subprocess.run([python_console(), os.path.join(stage, "relay.py"), "version"], capture_output=True,
+                               text=True, timeout=120, env=dict(os.environ, SESSION_RELAY_NO_UPDATE="1"),
+                               creationflags=NO_WINDOW)
         if check.returncode != 0 or check.stdout.strip() != target:
             raise ValueError("the new client did not start: %s" % (check.stderr.strip()[-300:] or check.stdout.strip()))
         previous = path("app.prev")
@@ -856,7 +984,7 @@ def cmd_init(args):
         say(t("unreachable", server=server, e=e))
         return 1
     cfg.update({"user_id": me.get("user_id"), "phone_hint": me.get("phone_hint"), "expires_at": me.get("expires_at"),
-                "activated_at": now_utc().isoformat(), "hostname": os.uname().nodename})
+                "activated_at": now_utc().isoformat(), "hostname": platform.node()})
     previous = load_config()
     save_config(cfg)
     state = load_state()
@@ -977,7 +1105,19 @@ def cmd_uninstall(args):
     return 0
 
 
+def fix_streams():
+    """pythonw.exe (the Windows job) has no stdout; a console in cp949 or cp1252 cannot show every character."""
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name)
+        if stream is None:
+            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
+        elif hasattr(stream, "reconfigure"):
+            with contextlib.suppress(ValueError, OSError):
+                stream.reconfigure(errors="replace")
+
+
 def main(argv=None):
+    fix_streams()
     parser = argparse.ArgumentParser(prog="relay", description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("init")
