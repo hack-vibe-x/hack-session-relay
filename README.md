@@ -166,6 +166,8 @@ cp admin/config.example.json admin/config.json   # fill in server_url and admin_
 python3 admin/admin.py                            # http://127.0.0.1:8787
 ```
 
+**As a Mac app**: `admin/mac/build.sh install` builds `~/Applications/Session Relay.app` (a small Swift app, the hack-vibe-x X icon with "relay"). Opening it starts `admin/admin.py` if it is not running already and shows the page in its own window. Quitting it stops only the `admin.py` it started. Zip downloads go to the Downloads folder. Run the command again after moving the repository folder; `admin/mac/build.sh uninstall` removes the app. It needs the Xcode command line tools.
+
 - **Issue a code**: enter a phone number, a memo and an end date to get the code and the message for the user. The message can be copied again later from the user's page. The code itself is kept only in `admin/data/codes.json`; the server keeps only its hash.
 - **Change the end date / End now**: the user's computer learns it at its next sync and stops by itself.
 - **Client version**: each user's page shows the client version that computer runs.
@@ -354,6 +356,8 @@ railway domain
 cp admin/config.example.json admin/config.json   # server_url, admin_key 채우기
 python3 admin/admin.py                            # http://127.0.0.1:8787
 ```
+
+**맥 앱으로 쓰기**: `admin/mac/build.sh install`을 실행하면 `~/Applications/Session Relay.app`이 만들어진다. Swift로 만든 작은 앱이고, 아이콘은 hack-vibe-x X 기호에 "relay" 띠를 두른 모양이다. 앱을 열면 `admin/admin.py`가 꺼져 있을 때 직접 켜고, 관리자 웹을 자기 창에 띄운다. 앱을 끄면 자기가 켠 `admin.py`만 끈다. zip 다운로드는 다운로드 폴더에 저장된다. 저장소 폴더를 옮겼으면 같은 명령을 다시 실행한다. 지우려면 `admin/mac/build.sh uninstall`을 실행한다. Xcode 명령행 도구가 필요하다.
 
 - **새 코드 발행**: 전화번호, 메모, 종료일을 넣으면 코드와 사용자에게 보낼 안내문이 나온다. 안내문은 나중에 사용자 화면에서 다시 복사할 수 있다. 코드 원문은 `admin/data/codes.json`에만 남고, 서버에는 해시만 있다.
 - **종료일 변경 / 지금 종료**: 사용자 컴퓨터는 다음 동기화 때 이를 알고 스스로 멈춘다.

@@ -211,8 +211,11 @@ class E2E(unittest.TestCase):
         self.assertEqual((rc, out), (0, ""))  # No more calls.
 
     def test_local_expiry_stops_without_calling(self):
-        uid, code = self.issue(end="2026-11-18T00:00:00Z")
-        rc, out = self.relay("init", "--code", code, "--no-job", now="2026-11-17 09:00")
+        # The server judges the end date by the real clock, so it must still be ahead at install time.
+        today = datetime.date.today()
+        end = today + datetime.timedelta(days=2)
+        uid, code = self.issue(end=end.isoformat() + "T00:00:00Z")
+        rc, out = self.relay("init", "--code", code, "--no-job", now=today.isoformat() + " 09:00")
         self.assertEqual(rc, 0, out)
         cfg_path = os.path.join(self.env["SESSION_RELAY_HOME"], "config.json")
         with open(cfg_path) as f:
@@ -220,7 +223,7 @@ class E2E(unittest.TestCase):
         cfg["server"] = "http://127.0.0.1:9"  # Nothing listens: a call would fail with a network error.
         with open(cfg_path, "w") as f:
             json.dump(cfg, f)
-        rc, out = self.relay("tick", now="2026-11-19 09:00")
+        rc, out = self.relay("tick", now=(end + datetime.timedelta(days=1)).isoformat() + " 09:00")
         self.assertIn("Stopped (ended)", out)
         self.assertNotIn("reach", out)
 
